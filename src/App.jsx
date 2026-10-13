@@ -64,21 +64,22 @@ const NAV = [
   { id: "inventory", label: "Inventory", icon: Boxes },
 ];
 
-// Only 2 load cells exist physically — Large and Medium are weighed directly.
-// Debris is never weighed; it's whatever's left after subtracting the two measured weights from the input.
+// Three bins, each with its own load cell (per the paper): every fraction is weighed directly.
+//   Bin 1 = largest grade (>7.5 mm), Bin 2 = medium grade (5.5-7.5 mm), Bin 3 = fine/debris (<5.5 mm)
 const CATS = ["large", "medium", "debris"];
-const CAT_LABEL = { large: "Large", medium: "Medium", debris: "Debris" };
+const CAT_LABEL = { large: "Large", medium: "Medium", debris: "Fine / debris" };
 const CAT_COLOR = { large: "#E3BE58", medium: "#B98A3E", debris: "#231710" };
+const BIN_INFO = { large: "Bin 1 · >7.5 mm", medium: "Bin 2 · 5.5–7.5 mm", debris: "Bin 3 · <5.5 mm" };
 
 const SEED_BATCHES = [
   { id: "B001", date: "2026-09-13 08:02", beanType: "Arabica", mode: "Automatic", vibrationSpeed: 62, inputWeight: 1000,
-    weights: { large: 350, medium: 400, debris: 250 }, processingTime: 12 * 60 },
+    weights: { large: 360, medium: 390, debris: 230 }, processingTime: 12 * 60 },
   { id: "B002", date: "2026-09-13 09:41", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 55, inputWeight: 1200,
-    weights: { large: 456, medium: 480, debris: 264 }, processingTime: 14 * 60 },
+    weights: { large: 456, medium: 470, debris: 250 }, processingTime: 14 * 60 },
   { id: "B003", date: "2026-09-14 07:55", beanType: "Arabica", mode: "Manual", vibrationSpeed: 48, inputWeight: 900,
-    weights: { large: 288, medium: 351, debris: 261 }, processingTime: 16 * 60 },
+    weights: { large: 288, medium: 330, debris: 260 }, processingTime: 16 * 60 },
   { id: "B004", date: "2026-09-14 10:20", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 58, inputWeight: 1100,
-    weights: { large: 385, medium: 440, debris: 275 }, processingTime: 13 * 60 },
+    weights: { large: 385, medium: 420, debris: 270 }, processingTime: 13 * 60 },
 ];
 
 function computeMetrics(b) {
@@ -89,6 +90,25 @@ function computeMetrics(b) {
   const finePct = (debris / b.inputWeight) * 100;
   const shrinkagePct = ((b.inputWeight - totalRecovered) / b.inputWeight) * 100;
   return { sorted, totalRecovered, yieldPct, finePct, shrinkagePct };
+}
+
+// Accuracy rate (%) = correctly sorted / total beans checked x 100, summed over the three bins
+function overallAccuracy(bins) {
+  let correct = 0, checked = 0;
+  CATS.forEach((c) => {
+    correct += (bins && bins[c] && bins[c].correct) || 0;
+    checked += (bins && bins[c] && bins[c].checked) || 0;
+  });
+  return checked > 0 ? (correct / checked) * 100 : null;
+}
+
+// Mean = sum(x) / n ; sample standard deviation uses n - 1 (as in the paper)
+function meanSD(values) {
+  const n = values.length;
+  if (n === 0) return { n: 0, mean: null, sd: null };
+  const mean = values.reduce((a, x) => a + x, 0) / n;
+  const sd = n > 1 ? Math.sqrt(values.reduce((a, x) => a + (x - mean) ** 2, 0) / (n - 1)) : null;
+  return { n, mean, sd };
 }
 
 function fmtTime(sec) {
@@ -387,6 +407,7 @@ export default function CoffeeSorterApp() {
   const [connected, setConnected] = useState(true);
   const [dbDown, setDbDown] = useState(false);
   const [fault, setFault] = useState(null);
+  const [accuracy, setAccuracy] = useState({}); // { B001: { large: {checked, correct}, ... } }
   const [batches, setBatches] = useState(SEED_BATCHES);
 
   // Load real data from the MySQL database (also used by the "Retry" button)
@@ -415,6 +436,32 @@ export default function CoffeeSorterApp() {
         }
       })
       .catch(() => setDbDown(true));
+
+    // accuracy checks: failures are silent (the accuracy_checks table is optional until it's created)
+    fetch(`${API_BASE}/get_accuracy.php`)
+      .then((r) => r.json())
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        const next = {};
+        rows.forEach((r) => {
+          if (!next[r.batch_code]) next[r.batch_code] = {};
+          next[r.batch_code][r.bin_name] = { checked: Number(r.beans_checked), correct: Number(r.correctly_sorted) };
+        });
+        setAccuracy(next);
+      })
+      .catch(() => {});
+  }
+
+  function saveAccuracy(batchId, bins) {
+    setAccuracy((a) => ({ ...a, [batchId]: bins }));
+    return fetch(`${API_BASE}/save_accuracy.php`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batch_code: batchId, bins }),
+    })
+      .then((r) => r.json())
+      .then((res) => !!res.success)
+      .catch(() => false);
   }
 
   useEffect(() => {
@@ -433,25 +480,19 @@ export default function CoffeeSorterApp() {
     inputTarget: 1000,
     sortingCategory: "—",
   });
-  const [live, setLive] = useState({ large: 0, medium: 0 });
-  // Derived display object: debris is computed, never measured — input minus the two weighed sizes
-  const liveDisplay = {
-    large: live.large,
-    medium: live.medium,
-    debris: Math.max(machine.inputTarget - live.large - live.medium, 0),
-  };
+  const [live, setLive] = useState({ large: 0, medium: 0, debris: 0 });
 
   const tickRef = useRef(null);
   const PROCESS_TICKS = 60; // simulated run length
 
-  // simulated ESP32 stream — only 2 load cells, so only Large and Medium are actively weighed
+  // simulated ESP32 stream — three load cells, one under each bin
   useEffect(() => {
     if (machine.status !== "Processing") return;
     tickRef.current = setInterval(() => {
       setMachine((m) => {
         const nextTime = m.processingTime + 1;
         const done = nextTime >= PROCESS_TICKS;
-        const cats = ["Large", "Medium"];
+        const cats = ["Large", "Medium", "Fine / debris"];
         return {
           ...m,
           processingTime: nextTime,
@@ -460,10 +501,12 @@ export default function CoffeeSorterApp() {
         };
       });
       setLive((prev) => {
-        const jitter = () => 0.85 + Math.random() * 0.3;
+        // the three bins end near 40% / 38% / 19% of the input; the ~3% gap is real handling loss (shrinkage)
+        const jitter = () => 0.9 + Math.random() * 0.2;
         return {
           large: prev.large + (machine.inputTarget * 0.40) / PROCESS_TICKS * jitter(),
-          medium: prev.medium + (machine.inputTarget * 0.35) / PROCESS_TICKS * jitter(),
+          medium: prev.medium + (machine.inputTarget * 0.38) / PROCESS_TICKS * jitter(),
+          debris: prev.debris + (machine.inputTarget * 0.19) / PROCESS_TICKS * jitter(),
         };
       });
     }, 200);
@@ -473,13 +516,14 @@ export default function CoffeeSorterApp() {
   // finalize on completion
   useEffect(() => {
     if (machine.status === "Completed") {
-      const roundedLarge = Math.round(live.large);
-      const roundedMedium = Math.round(live.medium);
-      const rounded = {
-        large: roundedLarge,
-        medium: roundedMedium,
-        debris: Math.max(machine.inputTarget - roundedLarge - roundedMedium, 0),
-      };
+      let L = Math.round(live.large), M = Math.round(live.medium), D = Math.round(live.debris);
+      const binSum = L + M + D;
+      if (binSum > machine.inputTarget) {
+        // the bins can never hold more than was loaded
+        const k = machine.inputTarget / binSum;
+        L = Math.floor(L * k); M = Math.floor(M * k); D = Math.floor(D * k);
+      }
+      const rounded = { large: L, medium: M, debris: D };
       const record = {
         id: machine.batchId,
         date: new Date().toISOString().slice(0, 16).replace("T", " "),
@@ -534,7 +578,7 @@ export default function CoffeeSorterApp() {
   }, [connected]);
 
   function resetRun() {
-    setLive({ large: 0, medium: 0 });
+    setLive({ large: 0, medium: 0, debris: 0 });
     setMachine((m) => ({ ...m, status: "Idle", processingTime: 0, liveWeight: 0, sortingCategory: "—" }));
   }
   function triggerFault(key) {
@@ -553,7 +597,7 @@ export default function CoffeeSorterApp() {
 
   function handleStart() {
     if (machine.status === "Processing" || !connected || fault) return;
-    setLive({ large: 0, medium: 0 });
+    setLive({ large: 0, medium: 0, debris: 0 });
     setMachine((m) => ({ ...m, status: "Processing", processingTime: 0, liveWeight: 0 }));
   }
   function handleStop() {
@@ -562,7 +606,7 @@ export default function CoffeeSorterApp() {
   function handleReset() {
     clearInterval(tickRef.current);
     setFault(null);
-    setLive({ large: 0, medium: 0 });
+    setLive({ large: 0, medium: 0, debris: 0 });
     setMachine((m) => ({
       ...m,
       status: connected ? "Idle" : "Error",
@@ -716,7 +760,7 @@ export default function CoffeeSorterApp() {
         )}
 
         <div className="flex-1 overflow-auto px-1 py-1">
-          {view === "dashboard" && <Dashboard machine={machine} live={liveDisplay} />}
+          {view === "dashboard" && <Dashboard machine={machine} live={live} />}
           {view === "control" && (
             <Control
               machine={machine}
@@ -732,10 +776,10 @@ export default function CoffeeSorterApp() {
               onFault={triggerFault}
             />
           )}
-          {view === "sorting" && <SortingMonitor machine={machine} live={liveDisplay} />}
-          {view === "weight" && <WeightMonitor machine={machine} live={liveDisplay} />}
-          {view === "analytics" && <Analytics batches={batches} lastBatch={lastBatch} />}
-          {view === "batches" && <BatchManagement machine={machine} live={liveDisplay} lastBatch={lastBatch} />}
+          {view === "sorting" && <SortingMonitor machine={machine} live={live} />}
+          {view === "weight" && <WeightMonitor machine={machine} live={live} />}
+          {view === "analytics" && <Analytics batches={batches} lastBatch={lastBatch} accuracy={accuracy} onSaveAccuracy={saveAccuracy} />}
+          {view === "batches" && <BatchManagement machine={machine} live={live} lastBatch={lastBatch} />}
           {view === "history" && <BatchHistory batches={batches} sel={historySel} setSel={setHistorySel} />}
           {view === "inventory" && <Inventory inventory={inventory} />}
         </div>
@@ -994,6 +1038,7 @@ function SortingMonitor({ machine, live }) {
                 <td className="py-2.5 flex items-center gap-2" style={{ fontSize: 13 }}>
                   <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block" }} />
                   {CAT_LABEL[c]}
+                  <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
                 </td>
                 <td className="text-right" style={{ ...mono, fontSize: 13 }}>{Math.round(live[c])} g</td>
                 <td className="text-right" style={{ ...mono, fontSize: 13, color: C.textDim }}>
@@ -1010,7 +1055,7 @@ function SortingMonitor({ machine, live }) {
         </table>
       </Panel>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {CATS.map((c) => (
           <Panel key={c}>
             <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>{CAT_LABEL[c]}</div>
@@ -1045,6 +1090,7 @@ function WeightMonitor({ machine, live }) {
   const yieldPct = inputW ? (sorted / inputW) * 100 : 0;
   const finePct = inputW ? (live.debris / inputW) * 100 : 0;
   const shrinkPct = inputW ? ((inputW - total) / inputW) * 100 : 0;
+  const batchDone = machine.status === "Completed"; // shrinkage is only final once all three bins have settled
 
   return (
     <div className="flex flex-col gap-5 max-w-4xl">
@@ -1054,9 +1100,9 @@ function WeightMonitor({ machine, live }) {
 
       <div className="grid grid-cols-4 gap-4">
         <Panel><Metric label="TOTAL INPUT WEIGHT" value={inputW} unit="g" /></Panel>
-        <Panel><Metric label="TOTAL SORTED WEIGHT" value={Math.round(sorted)} unit="g" color={C.green} /></Panel>
-        <Panel><Metric label="DEBRIS WEIGHT (calculated)" value={Math.round(live.debris)} unit="g" color={C.red} /></Panel>
-        <Panel><Metric label="REMAINING / UNACCOUNTED" value={Math.round(remaining)} unit="g" color={C.amber} /></Panel>
+        <Panel><Metric label="SORTED WEIGHT (BIN 1 + 2)" value={Math.round(sorted)} unit="g" color={C.green} /></Panel>
+        <Panel><Metric label="FINE / DEBRIS WEIGHT (BIN 3)" value={Math.round(live.debris)} unit="g" color={C.red} /></Panel>
+        <Panel><Metric label="NOT YET RECORDED" value={Math.round(remaining)} unit="g" color={C.amber} /></Panel>
       </div>
 
       <Panel title="Weight per category">
@@ -1080,11 +1126,11 @@ function WeightMonitor({ machine, live }) {
 
       <div className="grid grid-cols-3 gap-4">
         <Panel title="Yield"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.green }}>{yieldPct.toFixed(1)}%</div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>sorted ÷ input × 100</div></Panel>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>(Bin 1 + Bin 2) ÷ input × 100</div></Panel>
         <Panel title="Fine / debris %"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.red }}>{finePct.toFixed(1)}%</div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>fine ÷ input × 100</div></Panel>
-        <Panel title="Shrinkage"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.amber }}>{shrinkPct.toFixed(1)}%</div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>(input − recovered) ÷ input</div></Panel>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>Bin 3 ÷ input × 100</div></Panel>
+        <Panel title="Shrinkage"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.amber }}>{batchDone ? `${shrinkPct.toFixed(1)}%` : "—"}</div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>(input − (Bin 1 + 2 + 3)) ÷ input × 100 · final when the batch completes</div></Panel>
       </div>
     </div>
   );
@@ -1093,7 +1139,7 @@ function WeightMonitor({ machine, live }) {
 /* ---------------------------------------------------------------
    5. ANALYTICS
 --------------------------------------------------------------- */
-function Analytics({ batches, lastBatch }) {
+function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
   const m = computeMetrics(lastBatch);
   const sizeDist = CATS.map((c) => ({ name: CAT_LABEL[c], value: lastBatch.weights[c], color: CAT_COLOR[c] }));
 
@@ -1105,6 +1151,7 @@ function Analytics({ batches, lastBatch }) {
           id: b.id,
           yieldPct: +mm.yieldPct.toFixed(1),
           finePct: +mm.finePct.toFixed(1),
+          shrinkPct: +mm.shrinkagePct.toFixed(1),
           minutes: +(b.processingTime / 60).toFixed(1),
         };
       }),
@@ -1125,13 +1172,15 @@ function Analytics({ batches, lastBatch }) {
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
       <Panel title={`Batch summary — ${lastBatch.id}`} right={<BeanTag bean={lastBatch.beanType} />}>
-        <div className="grid grid-cols-4 gap-6 mb-4">
+        <div className="grid grid-cols-3 gap-6 mb-4">
           <Metric label="INPUT WEIGHT" value={lastBatch.inputWeight} unit="g" />
-          <Metric label="SORTED WEIGHT" value={m.sorted} unit="g" />
-          <Metric label="YIELD" value={m.yieldPct.toFixed(0)} unit="%" color={C.green} />
+          <Metric label="SORTED WEIGHT (BIN 1 + 2)" value={m.sorted} unit="g" />
+          <Metric label="YIELD" value={m.yieldPct.toFixed(1)} unit="%" color={C.green} />
+          <Metric label="FINE / DEBRIS" value={m.finePct.toFixed(1)} unit="%" color={C.red} />
+          <Metric label="SHRINKAGE" value={m.shrinkagePct.toFixed(1)} unit="%" color={C.amber} />
           <Metric label="PROCESSING TIME" value={fmtTime(lastBatch.processingTime)} />
         </div>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           {CATS.map((c) => (
             <div key={c} style={{ fontSize: 12 }}>
               <span style={{ color: C.textDim }}>{CAT_LABEL[c]}: </span>
@@ -1170,7 +1219,7 @@ function Analytics({ batches, lastBatch }) {
           </ResponsiveContainer>
         </Panel>
 
-        <Panel title="Yield & fine/debris trend">
+        <Panel title="Yield, fine/debris & shrinkage trend">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trend}>
               <CartesianGrid stroke={C.line} vertical={false} />
@@ -1178,7 +1227,8 @@ function Analytics({ batches, lastBatch }) {
               <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
               <Tooltip contentStyle={{ background: C.glassStrong, border: `1px solid ${C.glassBorder}`, borderRadius: 12, fontSize: 12 }} />
               <Line type="monotone" dataKey="yieldPct" stroke={C.amber} strokeWidth={2} dot={false} name="Yield %" />
-              <Line type="monotone" dataKey="finePct" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} name="Fine %" />
+              <Line type="monotone" dataKey="finePct" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} name="Fine / debris %" />
+              <Line type="monotone" dataKey="shrinkPct" stroke={C.green} strokeWidth={2} strokeDasharray="5 4" dot={false} name="Shrinkage %" />
             </LineChart>
           </ResponsiveContainer>
         </Panel>
@@ -1195,7 +1245,117 @@ function Analytics({ batches, lastBatch }) {
           </ResponsiveContainer>
         </Panel>
       </div>
+
+      <AccuracyPanel batches={batches} accuracy={accuracy} onSave={onSaveAccuracy} />
     </div>
+  );
+}
+
+
+/* ---------------------------------------------------------------
+   Sorting accuracy — beans checked per bin by caliper / reference sieve
+--------------------------------------------------------------- */
+function AccuracyPanel({ batches, accuracy, onSave }) {
+  const emptyBins = () => ({ large: { checked: 0, correct: 0 }, medium: { checked: 0, correct: 0 }, debris: { checked: 0, correct: 0 } });
+  const [selId, setSelId] = useState(batches[0] ? batches[0].id : "");
+  const [draft, setDraft] = useState(emptyBins());
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (!batches.some((b) => b.id === selId) && batches[0]) setSelId(batches[0].id);
+  }, [batches]);
+  useEffect(() => { setMsg(""); }, [selId]);
+  useEffect(() => {
+    setDraft(accuracy[selId] ? structuredClone(accuracy[selId]) : emptyBins());
+  }, [selId, accuracy]);
+
+  function setField(bin, key, val) {
+    const v = Math.max(0, Math.floor(Number(val) || 0));
+    setDraft((d) => ({ ...d, [bin]: { ...d[bin], [key]: v } }));
+  }
+
+  const invalid = CATS.some((c) => draft[c].correct > draft[c].checked);
+  const totalChecked = CATS.reduce((a, c) => a + draft[c].checked, 0);
+  const overall = overallAccuracy(draft);
+
+  // one accuracy rate per trial (= per batch that has a check), then mean and sample SD across trials
+  const trialRates = batches.map((b) => overallAccuracy(accuracy[b.id])).filter((v) => v !== null);
+  const stats = meanSD(trialRates);
+
+  const inputStyle = {
+    width: 96, textAlign: "right", padding: "6px 10px", borderRadius: 10, outline: "none",
+    border: `1px solid ${C.glassLine}`, background: C.glassStrong, color: C.text, ...mono, fontSize: 13,
+  };
+
+  return (
+    <Panel
+      title="Sorting accuracy — caliper / reference-sieve check"
+      right={
+        <select
+          value={selId}
+          onChange={(e) => setSelId(e.target.value)}
+          style={{ ...mono, fontSize: 12, padding: "4px 10px", borderRadius: 10, border: `1px solid ${C.glassLine}`, background: C.glassStrong, color: C.text }}
+        >
+          {batches.map((b) => <option key={b.id} value={b.id}>{b.id} · {b.beanType}</option>)}
+        </select>
+      }
+    >
+      <table className="w-full" style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+            {["BIN", "BEANS CHECKED", "CORRECTLY SORTED", "ACCURACY"].map((h, i) => (
+              <th key={h} className={i === 0 ? "text-left py-2" : "text-right py-2"} style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {CATS.map((c) => {
+            const bad = draft[c].correct > draft[c].checked;
+            return (
+              <tr key={c} style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+                <td className="py-2" style={{ fontSize: 13 }}>
+                  <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block", marginRight: 8 }} />
+                  {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
+                </td>
+                <td className="text-right"><input type="number" min={0} value={draft[c].checked} onChange={(e) => setField(c, "checked", e.target.value)} style={inputStyle} /></td>
+                <td className="text-right"><input type="number" min={0} value={draft[c].correct} onChange={(e) => setField(c, "correct", e.target.value)} style={{ ...inputStyle, borderColor: bad ? C.amber : C.glassLine }} /></td>
+                <td className="text-right" style={{ ...mono, fontSize: 13 }}>
+                  {draft[c].checked > 0 ? `${((draft[c].correct / draft[c].checked) * 100).toFixed(1)}%` : "—"}
+                </td>
+              </tr>
+            );
+          })}
+          <tr>
+            <td className="py-2" style={{ fontSize: 13, fontWeight: 600 }}>Overall (this batch)</td>
+            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{totalChecked}</td>
+            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{CATS.reduce((a, c) => a + draft[c].correct, 0)}</td>
+            <td className="text-right" style={{ ...mono, fontSize: 13, fontWeight: 700 }}>{overall !== null ? `${overall.toFixed(1)}%` : "—"}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="flex items-center gap-3 mt-4 flex-wrap">
+        <Button
+          variant="action"
+          disabled={invalid || totalChecked === 0}
+          onClick={() => onSave(selId, draft).then((ok) => setMsg(ok ? "Saved to the database." : "Saved on screen only — the accuracy_checks table isn't in the database yet."))}
+        >
+          SAVE ACCURACY CHECK
+        </Button>
+        {invalid && <span style={{ fontSize: 12, color: C.textDim }}>"Correctly sorted" can't be more than "Beans checked".</span>}
+        {msg && !invalid && <span style={{ fontSize: 12, color: C.textDim }}>{msg}</span>}
+      </div>
+
+      <div className="grid grid-cols-3 gap-6 mt-5 pt-4" style={{ borderTop: `1px solid ${C.glassLine}` }}>
+        <Metric label="TRIALS WITH A CHECK (n)" value={stats.n} />
+        <Metric label="MEAN ACCURACY (x̄)" value={stats.mean !== null ? stats.mean.toFixed(1) : "—"} unit={stats.mean !== null ? "%" : ""} color={C.green} />
+        <Metric label="STANDARD DEVIATION (SD)" value={stats.sd !== null ? stats.sd.toFixed(2) : "—"} unit={stats.sd !== null ? "%" : ""} />
+      </div>
+      <div style={{ fontSize: 11, color: C.textFaint, marginTop: 10, lineHeight: 1.6 }}>
+        Accuracy rate (%) = correctly sorted beans ÷ total beans checked × 100. Mean = Σx ÷ n; SD = √(Σ(x − x̄)² ÷ (n − 1)).
+        A low SD means the sorting is consistent across trials. SD needs at least 2 trials.
+      </div>
+    </Panel>
   );
 }
 

@@ -65,11 +65,11 @@ const NAV = [
 ];
 
 // Three bins, each with its own load cell (per the paper): every fraction is weighed directly.
-//   Bin 1 = largest grade (>7.5 mm), Bin 2 = medium grade (5.5-7.5 mm), Bin 3 = fine/debris (<5.5 mm)
+//   Bin 1 = largest grade (>5 mm), Bin 2 = medium grade (4-5 mm), Bin 3 = fine/debris (<4 mm)
 const CATS = ["large", "medium", "debris"];
 const CAT_LABEL = { large: "Large", medium: "Medium", debris: "Fine / debris" };
 const CAT_COLOR = { large: "#E3BE58", medium: "#B98A3E", debris: "#231710" };
-const BIN_INFO = { large: "Bin 1 · >7.5 mm", medium: "Bin 2 · 5.5–7.5 mm", debris: "Bin 3 · <5.5 mm" };
+const BIN_INFO = { large: "Bin 1 · >5 mm", medium: "Bin 2 · 4–5 mm", debris: "Bin 3 · <4 mm" };
 
 const SEED_BATCHES = [
   { id: "B001", date: "2026-09-13 08:02", beanType: "Arabica", mode: "Automatic", vibrationSpeed: 62, inputWeight: 1000,

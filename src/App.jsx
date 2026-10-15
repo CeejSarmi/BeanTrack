@@ -58,7 +58,6 @@ const NAV = [
   { id: "monitor", label: "Sorting & weight", icon: Scale },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "history", label: "Batch history", icon: History },
-  { id: "inventory", label: "Inventory", icon: Boxes },
 ];
 
 // Three bins, each with its own load cell (per the paper): every fraction is weighed directly.
@@ -66,30 +65,29 @@ const NAV = [
 const CATS = ["large", "medium", "debris"];
 const CAT_LABEL = { large: "Large", medium: "Medium", debris: "Fine / debris" };
 const CAT_COLOR = { large: "#E3BE58", medium: "#B98A3E", debris: "#231710" };
+const RECOMMENDED_SPEED = 40; // recommended vibration speed (%)
 const BIN_INFO = { large: "Bin 1 · >5 mm", medium: "Bin 2 · 4–5 mm", debris: "Bin 3 · <4 mm" };
 
 const SEED_BATCHES = [
-  { id: "B001", date: "2026-09-13 08:02", beanType: "Arabica", mode: "Automatic", vibrationSpeed: 62, inputWeight: 1000,
-    weights: { large: 360, medium: 390, debris: 230 }, processingTime: 12 * 60 },
-  { id: "B002", date: "2026-09-13 09:41", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 55, inputWeight: 1200,
-    weights: { large: 456, medium: 470, debris: 250 }, processingTime: 14 * 60 },
-  { id: "B003", date: "2026-09-14 07:55", beanType: "Arabica", mode: "Manual", vibrationSpeed: 48, inputWeight: 900,
-    weights: { large: 288, medium: 330, debris: 260 }, processingTime: 16 * 60 },
-  { id: "B004", date: "2026-09-14 10:20", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 58, inputWeight: 1100,
-    weights: { large: 385, medium: 420, debris: 270 }, processingTime: 13 * 60 },
+  { id: "B001", sample: true, date: "2026-09-13 08:02", beanType: "Arabica", mode: "Automatic", vibrationSpeed: 62, inputWeight: 1000,
+    weights: { large: 370, medium: 400, debris: 230 }, processingTime: 12 * 60 },
+  { id: "B002", sample: true, date: "2026-09-13 09:41", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 55, inputWeight: 1200,
+    weights: { large: 470, medium: 480, debris: 250 }, processingTime: 14 * 60 },
+  { id: "B003", sample: true, date: "2026-09-14 07:55", beanType: "Arabica", mode: "Manual", vibrationSpeed: 48, inputWeight: 900,
+    weights: { large: 300, medium: 340, debris: 260 }, processingTime: 16 * 60 },
+  { id: "B004", sample: true, date: "2026-09-14 10:20", beanType: "Robusta", mode: "Automatic", vibrationSpeed: 58, inputWeight: 1100,
+    weights: { large: 395, medium: 430, debris: 275 }, processingTime: 13 * 60 },
 ];
 
 function computeMetrics(b) {
   const sorted = b.weights.large + b.weights.medium;
   const debris = b.weights.debris;
-  const totalRecovered = sorted + debris;
   const yieldPct = (sorted / b.inputWeight) * 100;
   const finePct = (debris / b.inputWeight) * 100;
-  const shrinkagePct = ((b.inputWeight - totalRecovered) / b.inputWeight) * 100;
-  return { sorted, totalRecovered, yieldPct, finePct, shrinkagePct };
+  return { sorted, yieldPct, finePct };
 }
 
-// Accuracy rate (%) = correctly sorted / total beans checked x 100, summed over the three bins
+// Accuracy rate (%) = correctly sorted weight / total weight checked x 100, summed over the three bins (grams)
 function overallAccuracy(bins) {
   let correct = 0, checked = 0;
   CATS.forEach((c) => {
@@ -97,15 +95,6 @@ function overallAccuracy(bins) {
     checked += (bins && bins[c] && bins[c].checked) || 0;
   });
   return checked > 0 ? (correct / checked) * 100 : null;
-}
-
-// Mean = sum(x) / n ; sample standard deviation uses n - 1 (as in the paper)
-function meanSD(values) {
-  const n = values.length;
-  if (n === 0) return { n: 0, mean: null, sd: null };
-  const mean = values.reduce((a, x) => a + x, 0) / n;
-  const sd = n > 1 ? Math.sqrt(values.reduce((a, x) => a + (x - mean) ** 2, 0) / (n - 1)) : null;
-  return { n, mean, sd };
 }
 
 function fmtTime(sec) {
@@ -152,6 +141,33 @@ function Panel({ title, right, children, style }) {
       )}
       <div className="p-4">{children}</div>
     </div>
+  );
+}
+
+// Page title + one line saying what the page is for
+function PageHeader({ title, purpose }) {
+  return (
+    <div>
+      <div style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: C.textDim, marginTop: 2 }}>{purpose}</div>
+    </div>
+  );
+}
+
+// Small caps label that groups the panels beneath it
+function SectionLabel({ children }) {
+  return <div style={{ ...mono, fontSize: 10.5, letterSpacing: "0.08em", color: C.textFaint, marginBottom: -8 }}>{children}</div>;
+}
+
+// Marks demo rows so they can't be mistaken for real batches
+function SampleTag() {
+  return (
+    <span
+      title="Demo data, not a real batch"
+      style={{ ...mono, fontSize: 10, color: C.green, border: `1px solid ${C.amber}`, borderRadius: 999, padding: "1px 7px", marginLeft: 8 }}
+    >
+      SAMPLE
+    </span>
   );
 }
 
@@ -442,7 +458,7 @@ export default function CoffeeSorterApp() {
     batchId: nextBatchId(SEED_BATCHES),
     beanType: "Arabica",
     mode: "Automatic",
-    vibrationSpeed: 60,
+    vibrationSpeed: RECOMMENDED_SPEED,
     processingTime: 0,
     liveWeight: 0,
     inputTarget: 1000,
@@ -469,12 +485,12 @@ export default function CoffeeSorterApp() {
         };
       });
       setLive((prev) => {
-        // the three bins end near 40% / 38% / 19% of the input; the ~3% gap is real handling loss (shrinkage)
+        // the three bins end near 41% / 39% / 20% of the input, so together they add up to what was loaded
         const jitter = () => 0.9 + Math.random() * 0.2;
         return {
-          large: prev.large + (machine.inputTarget * 0.40) / PROCESS_TICKS * jitter(),
-          medium: prev.medium + (machine.inputTarget * 0.38) / PROCESS_TICKS * jitter(),
-          debris: prev.debris + (machine.inputTarget * 0.19) / PROCESS_TICKS * jitter(),
+          large: prev.large + (machine.inputTarget * 0.41) / PROCESS_TICKS * jitter(),
+          medium: prev.medium + (machine.inputTarget * 0.39) / PROCESS_TICKS * jitter(),
+          debris: prev.debris + (machine.inputTarget * 0.20) / PROCESS_TICKS * jitter(),
         };
       });
     }, 200);
@@ -716,7 +732,7 @@ export default function CoffeeSorterApp() {
         )}
 
         <div className="flex-1 overflow-auto px-1 py-1">
-          {view === "dashboard" && <Dashboard machine={machine} live={live} />}
+          {view === "dashboard" && <Dashboard machine={machine} live={live} inventory={inventory} dbDown={dbDown} />}
           {view === "control" && (
             <Control
               machine={machine}
@@ -735,7 +751,6 @@ export default function CoffeeSorterApp() {
           {view === "monitor" && <SortingWeightMonitor machine={machine} live={live} />}
           {view === "analytics" && <Analytics batches={batches} lastBatch={lastBatch} accuracy={accuracy} onSaveAccuracy={saveAccuracy} />}
           {view === "history" && <BatchHistory batches={batches} sel={historySel} setSel={setHistorySel} />}
-          {view === "inventory" && <Inventory inventory={inventory} />}
         </div>
       </div>
     </div>
@@ -745,14 +760,16 @@ export default function CoffeeSorterApp() {
 /* ---------------------------------------------------------------
    1. DASHBOARD
 --------------------------------------------------------------- */
-function Dashboard({ machine, live }) {
+function Dashboard({ machine, live, inventory, dbDown }) {
   const total = live.large + live.medium + live.debris;
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
-      <Panel title="System status">
+      <PageHeader title="Dashboard" purpose="Live view of the current batch and the stock on hand." />
+      <SectionLabel>CURRENT BATCH</SectionLabel>
+      <Panel title="Batch status">
         <div className="grid grid-cols-4 gap-6">
           <Metric label="STATUS" value={machine.status} color={STATUS_COLOR[machine.status]} />
-          <Metric label="BATCH NUMBER" value={machine.batchId} />
+          <Metric label={machine.status === "Idle" ? "NEXT BATCH NUMBER" : "BATCH NUMBER"} value={machine.batchId} />
           <Metric label="BEAN TYPE" value={machine.beanType} color={machine.beanType === "Arabica" ? C.arabica : C.robusta} />
           <Metric label="OPERATING MODE" value={machine.mode} color={machine.mode === "Automatic" ? C.blue : C.amber} />
         </div>
@@ -762,26 +779,36 @@ function Dashboard({ machine, live }) {
         <Panel title="Vibration speed">
           <Gauge className="mb-1" size={16} color={C.textFaint} />
           <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{machine.vibrationSpeed}<span style={{ fontSize: 15, color: C.textDim }}>%</span></div>
-          <div className="mt-2 h-1.5 w-full" style={{ background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
+          <div className="mt-2 h-1.5 w-full" style={{ position: "relative", background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
             <div className="h-full" style={{ width: `${machine.vibrationSpeed}%`, background: C.amber }} />
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: `${RECOMMENDED_SPEED}%`, width: 2, background: C.text, opacity: 0.55 }} />
           </div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>Recommended: {RECOMMENDED_SPEED}% (the line on the bar)</div>
         </Panel>
         <Panel title="Processing time">
           <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{fmtTime(machine.processingTime)}</div>
           <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>mm:ss elapsed this batch</div>
         </Panel>
-        <Panel title="Live weight">
+        <Panel title="Total recorded">
           <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{Math.round(total)}<span style={{ fontSize: 15, color: C.textDim }}> g</span></div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>of {machine.inputTarget} g target</div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>of {machine.inputTarget} g input · all three bins</div>
         </Panel>
       </div>
 
-      <Panel title="Current sorting category">
+      <Panel title="Active bin">
         <div className="flex items-center gap-3">
           <div style={{ width: 8, height: 8, background: C.blue, borderRadius: "50%" }} />
           <span style={{ ...mono, fontSize: 18, fontWeight: 600 }}>{machine.sortingCategory}</span>
         </div>
       </Panel>
+
+      <SectionLabel>STOCK ON HAND (kg)</SectionLabel>
+      {dbDown && (
+        <div style={{ fontSize: 12, color: C.textDim, marginTop: -4 }}>
+          The database is offline, so these are sample numbers, not your real stock.
+        </div>
+      )}
+      <InventoryPanels inventory={inventory} />
 
       <div style={{ fontSize: 11.5, color: C.textFaint }}>
         Start, stop, and reset the batch from Machine control.
@@ -801,6 +828,77 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
   const [hoveredBean, setHoveredBean] = useState(null);
   return (
     <div className="flex flex-col gap-5 max-w-3xl">
+      <PageHeader title="Machine control" purpose="Set up a batch, then start, stop or reset it." />
+      <SectionLabel>1 · BATCH SETUP</SectionLabel>
+      <Panel title="Bean type">
+        <div className="grid grid-cols-2 gap-3">
+          {["Arabica", "Robusta"].map((t) => {
+            const active = machine.beanType === t;
+            const hovered = hoveredBean === t;
+            let bg, fg, border;
+            if (active) { bg = C.green; fg = C.panel; border = C.green; }
+            else if (hovered) { bg = C.amber; fg = C.text; border = C.amber; }
+            else { bg = C.glass; fg = C.textDim; border = C.glassBorder; }
+            return (
+              <button
+                key={t}
+                onClick={() => setBeanType(t)}
+                onMouseEnter={() => setHoveredBean(t)}
+                onMouseLeave={() => setHoveredBean(null)}
+                disabled={locked}
+                className="py-3 flex items-center justify-center gap-2 transition-colors"
+                style={{
+                  border: `1px solid ${border}`,
+                  background: bg,
+                  color: fg,
+                  borderRadius: 14,
+                  ...blur,
+                  cursor: locked ? "not-allowed" : "pointer",
+                }}
+              >
+                <span style={{ width: 7, height: 7, background: fg, display: "inline-block" }} />
+                <span style={{ ...mono, fontSize: 12.5 }}>{t}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Panel>
+
+      <Panel title="Input weight (g)">
+        <div
+          className="flex items-center gap-4 px-3 py-2.5"
+          style={{
+            border: `1px solid ${weightActive ? C.amber : C.glassLine}`,
+            borderRadius: 14,
+            background: weightActive ? `${C.amber}0D` : "transparent",
+          }}
+        >
+          <input
+            type="range"
+            min={200}
+            max={2000}
+            step={50}
+            value={machine.inputTarget}
+            onChange={(e) => setInputTarget(Number(e.target.value))}
+            onFocus={() => setWeightActive(true)}
+            onBlur={() => setWeightActive(false)}
+            onPointerDown={() => setWeightActive(true)}
+            onPointerUp={() => setWeightActive(false)}
+            disabled={locked}
+            className="flex-1"
+            style={{ accentColor: weightActive ? C.amber : C.textFaint }}
+          />
+          <NumberField
+            value={machine.inputTarget}
+            onCommit={(v) => setInputTarget(clamp(v, 200, 5000))}
+            suffix="g"
+            width={92}
+            disabled={locked}
+          />
+        </div>
+        <div style={{ fontSize: 11.5, color: C.textDim, marginTop: 10 }}>Amount of green beans loaded into the hopper for this batch.</div>
+      </Panel>
+
       <Panel title="Operating mode">
         <div className="grid grid-cols-2 gap-3">
           {["Manual", "Automatic"].map((m) => {
@@ -836,41 +934,7 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
         {locked && <div style={{ fontSize: 11, color: C.textFaint, marginTop: 8 }}>Stop the batch to change mode.</div>}
       </Panel>
 
-      <Panel title="Bean type">
-        <div className="grid grid-cols-2 gap-3">
-          {["Arabica", "Robusta"].map((t) => {
-            const active = machine.beanType === t;
-            const hovered = hoveredBean === t;
-            let bg, fg, border;
-            if (active) { bg = C.green; fg = C.panel; border = C.green; }
-            else if (hovered) { bg = C.amber; fg = C.text; border = C.amber; }
-            else { bg = C.glass; fg = C.textDim; border = C.glassBorder; }
-            return (
-              <button
-                key={t}
-                onClick={() => setBeanType(t)}
-                onMouseEnter={() => setHoveredBean(t)}
-                onMouseLeave={() => setHoveredBean(null)}
-                disabled={locked}
-                className="py-3 flex items-center justify-center gap-2 transition-colors"
-                style={{
-                  border: `1px solid ${border}`,
-                  background: bg,
-                  color: fg,
-                  borderRadius: 14,
-                  ...blur,
-                  cursor: locked ? "not-allowed" : "pointer",
-                }}
-              >
-                <span style={{ width: 7, height: 7, background: fg, display: "inline-block" }} />
-                <span style={{ ...mono, fontSize: 12.5 }}>{t}</span>
-              </button>
-            );
-          })}
-        </div>
-      </Panel>
-
-      <Panel title="Vibration speed">
+      <Panel title="Vibration speed (%)">
         <div
           className="flex items-center gap-4 px-3 py-2.5"
           style={{
@@ -899,42 +963,22 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             width={78}
           />
         </div>
-      </Panel>
-
-      <Panel title="Batch input weight (target)">
-        <div
-          className="flex items-center gap-4 px-3 py-2.5"
-          style={{
-            border: `1px solid ${weightActive ? C.amber : C.glassLine}`,
-            borderRadius: 14,
-            background: weightActive ? `${C.amber}0D` : "transparent",
-          }}
-        >
-          <input
-            type="range"
-            min={200}
-            max={2000}
-            step={50}
-            value={machine.inputTarget}
-            onChange={(e) => setInputTarget(Number(e.target.value))}
-            onFocus={() => setWeightActive(true)}
-            onBlur={() => setWeightActive(false)}
-            onPointerDown={() => setWeightActive(true)}
-            onPointerUp={() => setWeightActive(false)}
-            disabled={locked}
-            className="flex-1"
-            style={{ accentColor: weightActive ? C.amber : C.textFaint }}
-          />
-          <NumberField
-            value={machine.inputTarget}
-            onCommit={(v) => setInputTarget(clamp(v, 200, 5000))}
-            suffix="g"
-            width={92}
-            disabled={locked}
-          />
+        <div className="flex items-center justify-between gap-3 flex-wrap" style={{ marginTop: 10 }}>
+          <span style={{ fontSize: 11.5, color: C.textDim }}>Motor power for the sieve, from 0 to 100%. Recommended: {RECOMMENDED_SPEED}%.</span>
+          <button
+            onClick={() => setSpeed(RECOMMENDED_SPEED)}
+            style={{
+              ...mono, fontSize: 11.5, padding: "4px 12px", borderRadius: 999, cursor: "pointer", color: C.text,
+              border: `1px solid ${C.amber}`,
+              background: machine.vibrationSpeed === RECOMMENDED_SPEED ? `${C.amber}40` : C.glass,
+            }}
+          >
+            {machine.vibrationSpeed === RECOMMENDED_SPEED ? `✓ At recommended speed (${RECOMMENDED_SPEED}%)` : `Use recommended speed (${RECOMMENDED_SPEED}%)`}
+          </button>
         </div>
       </Panel>
 
+      <SectionLabel>2 · RUN</SectionLabel>
       <Panel title="Batch controls">
         <div className="flex gap-3">
           <Button variant="action" icon={Power} onClick={onStart} disabled={locked || !connected || !!fault}>START SORTING</Button>
@@ -946,9 +990,11 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             Start is disabled until the alert above is cleared.
           </div>
         )}
+        <div style={{ fontSize: 11.5, color: C.textDim, marginTop: 10 }}>Stop ends the run without saving it. A batch is saved only when it completes. Reset clears the readings and moves to the next batch number.</div>
       </Panel>
 
-      <Panel title="Test error alerts (demo)">
+      <SectionLabel>DEMO TOOLS (NOT PART OF THE REAL SYSTEM)</SectionLabel>
+      <Panel title="Test error alerts" right={<span style={{ ...mono, fontSize: 10.5, color: C.green, border: `1px solid ${C.amber}`, borderRadius: 999, padding: "1px 8px" }}>DEMO ONLY</span>}>
         <div className="flex flex-wrap gap-3">
           <Button variant="action" icon={AlertTriangle} onClick={() => onFault("jam")} disabled={!!fault}>SIMULATE JAM</Button>
           <Button variant="action" icon={Scale} onClick={() => onFault("loadcell")} disabled={!!fault}>LOAD CELL FAULT</Button>
@@ -974,17 +1020,24 @@ function SortingWeightMonitor({ machine, live }) {
   const sorted = live.large + live.medium;
   const total = sorted + live.debris;
   const inputW = machine.inputTarget;
-  const notRecorded = Math.max(inputW - total, 0);
   const yieldPct = inputW ? (sorted / inputW) * 100 : 0;
   const finePct = inputW ? (live.debris / inputW) * 100 : 0;
-  const shrinkPct = inputW ? ((inputW - total) / inputW) * 100 : 0;
-  const batchDone = machine.status === "Completed"; // shrinkage is only final once all three bins have settled
 
   const rowStyle = { borderBottom: `1px solid ${C.glassLine}` };
   const valueStyle = { ...mono, fontSize: 13 };
 
   return (
     <div className="flex flex-col gap-5 max-w-3xl">
+      <PageHeader title="Sorting & weight" purpose="Weight recorded in each bin for the current batch, and the results worked out from it." />
+      <div className="flex items-center gap-2" style={{ fontSize: 12.5, color: C.textDim }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_COLOR[machine.status], display: "inline-block" }} />
+        {{
+          Processing: "Batch in progress. Values are still changing.",
+          Completed: "Batch complete. These are the final values.",
+          Error: "Run stopped by an error. Values are incomplete.",
+          Idle: "No batch running. Values stay at zero until a batch starts.",
+        }[machine.status]}
+      </div>
       <div style={{ fontSize: 11, color: C.textFaint, ...mono }}>
         LOAD CELL → HX711 → ESP32 → WEB APP → DATABASE
       </div>
@@ -1019,25 +1072,19 @@ function SortingWeightMonitor({ machine, live }) {
               <td className="py-2.5" style={{ fontSize: 13, fontWeight: 600 }}>Total recorded</td>
               <td className="text-right" style={{ ...valueStyle, fontWeight: 700 }}>{Math.round(total)} g</td>
             </tr>
-            <tr style={rowStyle}>
+            <tr>
               <td className="py-2.5" style={{ fontSize: 13 }}>Input weight</td>
               <td className="text-right" style={valueStyle}>{inputW} g</td>
-            </tr>
-            <tr>
-              <td className="py-2.5" style={{ fontSize: 13 }}>Not yet recorded</td>
-              <td className="text-right" style={{ ...valueStyle, color: C.amber }}>{Math.round(notRecorded)} g</td>
             </tr>
           </tbody>
         </table>
       </Panel>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Panel title="Yield"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.green }}>{yieldPct.toFixed(1)}%</div>
+      <div className="grid grid-cols-2 gap-4">
+        <Panel title={machine.status === "Processing" ? "Yield (so far)" : "Yield"}><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.green }}>{yieldPct.toFixed(1)}%</div>
           <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>(Bin 1 + Bin 2) ÷ input × 100</div></Panel>
-        <Panel title="Fine / debris %"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.red }}>{finePct.toFixed(1)}%</div>
+        <Panel title={machine.status === "Processing" ? "Fine / debris % (so far)" : "Fine / debris %"}><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.red }}>{finePct.toFixed(1)}%</div>
           <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>Bin 3 ÷ input × 100</div></Panel>
-        <Panel title="Shrinkage"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.amber }}>{batchDone ? `${shrinkPct.toFixed(1)}%` : "—"}</div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>(input − (Bin 1 + 2 + 3)) ÷ input × 100 · final when the batch completes</div></Panel>
       </div>
     </div>
   );
@@ -1058,7 +1105,6 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
           id: b.id,
           yieldPct: +mm.yieldPct.toFixed(1),
           finePct: +mm.finePct.toFixed(1),
-          shrinkPct: +mm.shrinkagePct.toFixed(1),
           minutes: +(b.processingTime / 60).toFixed(1),
         };
       }),
@@ -1078,13 +1124,16 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
 
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
-      <Panel title={`Batch summary — ${lastBatch.id}`} right={<BeanTag bean={lastBatch.beanType} />}>
+      <PageHeader title="Analytics" purpose="Results from saved batches, plus the sorting accuracy check." />
+      <Panel
+        title={`Batch summary — ${lastBatch.id} (latest batch)`}
+        right={<span className="flex items-center">{lastBatch.sample && <SampleTag />}<span style={{ width: 8 }} /><BeanTag bean={lastBatch.beanType} /></span>}
+      >
         <div className="grid grid-cols-3 gap-6">
           <Metric label="INPUT WEIGHT" value={lastBatch.inputWeight} unit="g" />
           <Metric label="SORTED WEIGHT (BIN 1 + 2)" value={m.sorted} unit="g" />
           <Metric label="YIELD" value={m.yieldPct.toFixed(1)} unit="%" color={C.green} />
           <Metric label="FINE / DEBRIS" value={m.finePct.toFixed(1)} unit="%" color={C.red} />
-          <Metric label="SHRINKAGE" value={m.shrinkagePct.toFixed(1)} unit="%" color={C.amber} />
           <Metric label="PROCESSING TIME" value={fmtTime(lastBatch.processingTime)} />
         </div>
       </Panel>
@@ -1116,7 +1165,7 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
           </ResponsiveContainer>
         </Panel>
 
-        <Panel title="Yield, fine/debris & shrinkage trend">
+        <Panel title="Yield & fine/debris trend">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trend}>
               <CartesianGrid stroke={C.line} vertical={false} />
@@ -1125,7 +1174,6 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
               <Tooltip contentStyle={{ background: C.glassStrong, border: `1px solid ${C.glassBorder}`, borderRadius: 12, fontSize: 12 }} />
               <Line type="monotone" dataKey="yieldPct" stroke={C.amber} strokeWidth={2} dot={false} name="Yield %" />
               <Line type="monotone" dataKey="finePct" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} name="Fine / debris %" />
-              <Line type="monotone" dataKey="shrinkPct" stroke={C.green} strokeWidth={2} strokeDasharray="5 4" dot={false} name="Shrinkage %" />
             </LineChart>
           </ResponsiveContainer>
         </Panel>
@@ -1175,10 +1223,6 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
   const totalChecked = CATS.reduce((a, c) => a + draft[c].checked, 0);
   const overall = overallAccuracy(draft);
 
-  // one accuracy rate per trial (= per batch that has a check), then mean and sample SD across trials
-  const trialRates = batches.map((b) => overallAccuracy(accuracy[b.id])).filter((v) => v !== null);
-  const stats = meanSD(trialRates);
-
   const inputStyle = {
     width: 96, textAlign: "right", padding: "6px 10px", borderRadius: 10, outline: "none",
     border: `1px solid ${C.glassLine}`, background: C.glassStrong, color: C.text, ...mono, fontSize: 13,
@@ -1186,21 +1230,21 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
 
   return (
     <Panel
-      title="Sorting accuracy — caliper / reference-sieve check"
+      title="Sorting accuracy — sample check by weight"
       right={
         <select
           value={selId}
           onChange={(e) => setSelId(e.target.value)}
           style={{ ...mono, fontSize: 12, padding: "4px 10px", borderRadius: 10, border: `1px solid ${C.glassLine}`, background: C.glassStrong, color: C.text }}
         >
-          {batches.map((b) => <option key={b.id} value={b.id}>{b.id} · {b.beanType}</option>)}
+          {batches.map((b) => <option key={b.id} value={b.id}>{b.id} · {b.beanType}{b.sample ? " (sample)" : ""}</option>)}
         </select>
       }
     >
       <table className="w-full" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${C.glassLine}` }}>
-            {["BIN", "BEANS CHECKED", "CORRECTLY SORTED", "ACCURACY"].map((h, i) => (
+            {["BIN", "WEIGHT CHECKED (g)", "CORRECTLY SORTED (g)", "ACCURACY"].map((h, i) => (
               <th key={h} className={i === 0 ? "text-left py-2" : "text-right py-2"} style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>{h}</th>
             ))}
           </tr>
@@ -1214,8 +1258,8 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
                   <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block", marginRight: 8 }} />
                   {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
                 </td>
-                <td className="text-right"><input type="number" min={0} value={draft[c].checked} onChange={(e) => setField(c, "checked", e.target.value)} style={inputStyle} /></td>
-                <td className="text-right"><input type="number" min={0} value={draft[c].correct} onChange={(e) => setField(c, "correct", e.target.value)} style={{ ...inputStyle, borderColor: bad ? C.amber : C.glassLine }} /></td>
+                <td className="text-right"><input type="number" min={0} value={draft[c].checked} onChange={(e) => setField(c, "checked", e.target.value)} style={inputStyle} /><span style={{ ...mono, fontSize: 12, color: C.textFaint, marginLeft: 6 }}>g</span></td>
+                <td className="text-right"><input type="number" min={0} value={draft[c].correct} onChange={(e) => setField(c, "correct", e.target.value)} style={{ ...inputStyle, borderColor: bad ? C.amber : C.glassLine }} /><span style={{ ...mono, fontSize: 12, color: C.textFaint, marginLeft: 6 }}>g</span></td>
                 <td className="text-right" style={{ ...mono, fontSize: 13 }}>
                   {draft[c].checked > 0 ? `${((draft[c].correct / draft[c].checked) * 100).toFixed(1)}%` : "—"}
                 </td>
@@ -1224,8 +1268,8 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
           })}
           <tr>
             <td className="py-2" style={{ fontSize: 13, fontWeight: 600 }}>Overall (this batch)</td>
-            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{totalChecked}</td>
-            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{CATS.reduce((a, c) => a + draft[c].correct, 0)}</td>
+            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{totalChecked} g</td>
+            <td className="text-right" style={{ ...mono, fontSize: 13 }}>{CATS.reduce((a, c) => a + draft[c].correct, 0)} g</td>
             <td className="text-right" style={{ ...mono, fontSize: 13, fontWeight: 700 }}>{overall !== null ? `${overall.toFixed(1)}%` : "—"}</td>
           </tr>
         </tbody>
@@ -1239,18 +1283,8 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
         >
           SAVE ACCURACY CHECK
         </Button>
-        {invalid && <span style={{ fontSize: 12, color: C.textDim }}>"Correctly sorted" can't be more than "Beans checked".</span>}
+        {invalid && <span style={{ fontSize: 12, color: C.textDim }}>"Correctly sorted" can't be more than "Weight checked".</span>}
         {msg && !invalid && <span style={{ fontSize: 12, color: C.textDim }}>{msg}</span>}
-      </div>
-
-      <div className="grid grid-cols-3 gap-6 mt-5 pt-4" style={{ borderTop: `1px solid ${C.glassLine}` }}>
-        <Metric label="TRIALS WITH A CHECK (n)" value={stats.n} />
-        <Metric label="MEAN ACCURACY (x̄)" value={stats.mean !== null ? stats.mean.toFixed(1) : "—"} unit={stats.mean !== null ? "%" : ""} color={C.green} />
-        <Metric label="STANDARD DEVIATION (SD)" value={stats.sd !== null ? stats.sd.toFixed(2) : "—"} unit={stats.sd !== null ? "%" : ""} />
-      </div>
-      <div style={{ fontSize: 11, color: C.textFaint, marginTop: 10, lineHeight: 1.6 }}>
-        Accuracy rate (%) = correctly sorted beans ÷ total beans checked × 100. Mean = Σx ÷ n; SD = √(Σ(x − x̄)² ÷ (n − 1)).
-        A low SD means the sorting is consistent across trials. SD needs at least 2 trials.
       </div>
     </Panel>
   );
@@ -1266,23 +1300,23 @@ function Field({ label, value }) {
 }
 
 /* ---------------------------------------------------------------
-   7. INVENTORY
+   7. INVENTORY (shown on the Dashboard)
 --------------------------------------------------------------- */
-function Inventory({ inventory }) {
+function InventoryPanels({ inventory }) {
   return (
-    <div className="flex flex-col gap-5 max-w-3xl">
+    <div className="grid grid-cols-2 gap-5">
       {Object.entries(inventory).map(([bean, cats]) => {
         const color = bean === "Arabica" ? C.arabica : C.robusta;
         const total = CATS.reduce((s, c) => s + cats[c], 0);
         return (
-          <Panel key={bean} title={bean} right={<span style={{ ...mono, fontSize: 12, color }}>{total.toFixed(1)} kg total</span>}>
+          <Panel key={bean} title={`Inventory — ${bean}`} right={<span style={{ ...mono, fontSize: 12, color }}>{total.toFixed(1)} kg total</span>}>
             <div className="flex flex-col gap-2.5">
               {CATS.map((c, i) => (
                 <div key={c} className="flex items-center gap-3">
                   <span style={{ ...mono, fontSize: 12, color: C.textFaint, width: 14 }}>{i === CATS.length - 1 ? "└" : "├"}</span>
                   <span style={{ fontSize: 13, width: 100 }}>{CAT_LABEL[c]}</span>
                   <div className="flex-1 h-1.5" style={{ background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
-                    <div className="h-full" style={{ width: `${(cats[c] / total) * 100}%`, background: color }} />
+                    <div className="h-full" style={{ width: `${total > 0 ? (cats[c] / total) * 100 : 0}%`, background: color }} />
                   </div>
                   <span style={{ ...mono, fontSize: 13, width: 64, textAlign: "right" }}>{cats[c].toFixed(1)} kg</span>
                 </div>
@@ -1303,12 +1337,23 @@ function BatchHistory({ batches, sel, setSel }) {
 
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
+      <PageHeader title="Batch history" purpose="Every saved batch. Click a row to see its details." />
+      {batches.some((b) => b.sample) && (
+        <div style={{ fontSize: 12, color: C.textDim, marginTop: -4 }}>
+          Rows marked SAMPLE are demo data, not real batches. They disappear once real batches are saved.
+        </div>
+      )}
       <Panel title="All batches">
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${C.line}` }}>
-              {["BATCH", "DATE", "TYPE", "INPUT", "YIELD", "FINE/DEBRIS", "SHRINKAGE", "TIME"].map((h) => (
-                <th key={h} className="text-left py-2 pr-4" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>{h}</th>
+              {[
+                ["BATCH", ""], ["DATE", ""], ["TYPE", ""], ["INPUT (g)", ""],
+                ["YIELD", "(Bin 1 + Bin 2) ÷ input × 100"],
+                ["FINE/DEBRIS", "Bin 3 ÷ input × 100"],
+                ["TIME (mm:ss)", ""],
+              ].map(([h, tip]) => (
+                <th key={h} title={tip} className="text-left py-2 pr-4" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -1322,13 +1367,12 @@ function BatchHistory({ batches, sel, setSel }) {
                   onClick={() => setSel(active ? null : b.id)}
                   style={{ borderBottom: `1px solid ${C.line}`, cursor: "pointer", background: active ? C.panelRaised : "transparent" }}
                 >
-                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{b.id}</td>
+                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{b.id}{b.sample && <SampleTag />}</td>
                   <td className="py-2.5 pr-4" style={{ fontSize: 12.5, color: C.textDim }}>{b.date}</td>
                   <td className="py-2.5 pr-4"><BeanTag bean={b.beanType} /></td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{b.inputWeight} g</td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.green }}>{m.yieldPct.toFixed(1)}%</td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.red }}>{m.finePct.toFixed(1)}%</td>
-                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.amber }}>{m.shrinkagePct.toFixed(1)}%</td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{fmtTime(b.processingTime)}</td>
                 </tr>
               );

@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
-  Power, Square, RotateCcw, Wifi, WifiOff, ChevronRight, Coffee,
-  Gauge, Scale, LayoutGrid, BarChart3, Boxes, History, ClipboardList,
-  SlidersHorizontal, AlertTriangle, CheckCircle2, Circle, Database,
+  Power, Square, RotateCcw, Wifi, WifiOff, Coffee,
+  Gauge, Scale, LayoutGrid, BarChart3, Boxes, History, SlidersHorizontal, AlertTriangle, Database,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -59,7 +58,6 @@ const NAV = [
   { id: "sorting", label: "Sorting monitor", icon: Coffee },
   { id: "weight", label: "Weight monitor", icon: Scale },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "batches", label: "Batch management", icon: ClipboardList },
   { id: "history", label: "Batch history", icon: History },
   { id: "inventory", label: "Inventory", icon: Boxes },
 ];
@@ -158,26 +156,6 @@ function Panel({ title, right, children, style }) {
   );
 }
 
-function StatusPill({ status }) {
-  const color = STATUS_COLOR[status];
-  return (
-    <div
-      className="inline-flex items-center gap-2 px-2.5 py-1"
-      style={{ border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999 }}
-    >
-      {status === "Processing" ? (
-        <span
-          className="inline-block rounded-full"
-          style={{ width: 6, height: 6, background: color, boxShadow: `0 0 0 3px ${color}33` }}
-        />
-      ) : (
-        <Circle size={7} color={color} fill={color} />
-      )}
-      <span style={{ ...mono, color, fontSize: 12, fontWeight: 600 }}>{status}</span>
-    </div>
-  );
-}
-
 function Metric({ label, value, unit, color }) {
   return (
     <div>
@@ -199,15 +177,6 @@ function BeanTag({ bean }) {
     >
       <span style={{ width: 6, height: 6, background: color, display: "inline-block", borderRadius: 1 }} />
       {bean}
-    </span>
-  );
-}
-
-function ModePill({ mode }) {
-  const color = mode === "Automatic" ? C.blue : C.amber;
-  return (
-    <span style={{ ...mono, fontSize: 11, color, border: `1px solid ${color}55`, padding: "2px 10px", borderRadius: 999 }}>
-      {mode}
     </span>
   );
 }
@@ -705,6 +674,9 @@ export default function CoffeeSorterApp() {
         </nav>
 
         <div className="px-4 py-3" style={{ borderTop: `1px solid ${C.sidebarBorder}` }}>
+          <div style={{ ...mono, fontSize: 10, color: C.sidebarTextDim, marginBottom: 8, letterSpacing: "0.04em" }}>
+            BeanTrack · sorting &amp; monitoring
+          </div>
           <button
             onClick={() => (connected ? setConnected(false) : reconnect())}
             className="w-full flex items-center gap-2"
@@ -718,21 +690,6 @@ export default function CoffeeSorterApp() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 gap-3" style={{ position: "relative" }}>
-        <div
-          className="flex items-center px-5 py-3 shrink-0"
-          style={{
-            background: C.glass,
-            border: `1px solid ${C.glassBorder}`,
-            borderRadius: 16,
-            boxShadow: C.glassShadow,
-            ...blur,
-          }}
-        >
-          <div className="flex items-center gap-2" style={{ ...mono, fontSize: 11, color: C.textFaint }}>
-            <span>BeanTrack  /  {NAV.find((n) => n.id === view)?.label}</span>
-          </div>
-        </div>
-
         {(!connected || faultInfo || dbDown) && (
           <div className="flex flex-col gap-3 shrink-0">
             {!connected && (
@@ -779,7 +736,6 @@ export default function CoffeeSorterApp() {
           {view === "sorting" && <SortingMonitor machine={machine} live={live} />}
           {view === "weight" && <WeightMonitor machine={machine} live={live} />}
           {view === "analytics" && <Analytics batches={batches} lastBatch={lastBatch} accuracy={accuracy} onSaveAccuracy={saveAccuracy} />}
-          {view === "batches" && <BatchManagement machine={machine} live={live} lastBatch={lastBatch} />}
           {view === "history" && <BatchHistory batches={batches} sel={historySel} setSel={setHistorySel} />}
           {view === "inventory" && <Inventory inventory={inventory} />}
         </div>
@@ -1020,60 +976,30 @@ function SortingMonitor({ machine, live }) {
   const total = live.large + live.medium + live.debris;
   return (
     <div className="flex flex-col gap-5 max-w-3xl">
-      <Panel
-        title={`Bean type: ${machine.beanType}`}
-        right={<BeanTag bean={machine.beanType} />}
-      >
+      <Panel title="Weight per bin" right={<BeanTag bean={machine.beanType} />}>
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ borderBottom: `1px solid ${C.line}` }}>
-              <th className="text-left py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>CATEGORY</th>
+            <tr style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+              <th className="text-left py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>BIN</th>
               <th className="text-right py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>WEIGHT</th>
-              <th className="text-right py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>SHARE</th>
             </tr>
           </thead>
           <tbody>
             {CATS.map((c) => (
-              <tr key={c} style={{ borderBottom: `1px solid ${C.line}` }}>
-                <td className="py-2.5 flex items-center gap-2" style={{ fontSize: 13 }}>
-                  <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block" }} />
-                  {CAT_LABEL[c]}
-                  <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
+              <tr key={c} style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+                <td className="py-2.5" style={{ fontSize: 13 }}>
+                  <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block", marginRight: 8 }} />
+                  {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
                 </td>
                 <td className="text-right" style={{ ...mono, fontSize: 13 }}>{Math.round(live[c])} g</td>
-                <td className="text-right" style={{ ...mono, fontSize: 13, color: C.textDim }}>
-                  {total > 0 ? ((live[c] / total) * 100).toFixed(1) : "0.0"}%
-                </td>
               </tr>
             ))}
             <tr>
-              <td className="py-2.5" style={{ fontSize: 13, fontWeight: 600 }}>Total</td>
+              <td className="py-2.5" style={{ fontSize: 13, fontWeight: 600 }}>Total recorded</td>
               <td className="text-right" style={{ ...mono, fontSize: 13, fontWeight: 700 }}>{Math.round(total)} g</td>
-              <td className="text-right" style={{ ...mono, fontSize: 13, color: C.textDim }}>100%</td>
             </tr>
           </tbody>
         </table>
-      </Panel>
-
-      <div className="grid grid-cols-3 gap-3">
-        {CATS.map((c) => (
-          <Panel key={c}>
-            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>{CAT_LABEL[c]}</div>
-            <div style={{ ...mono, fontSize: 20, fontWeight: 700, color: CAT_COLOR[c] }}>{Math.round(live[c])} g</div>
-          </Panel>
-        ))}
-      </div>
-
-      <Panel title="Live classification feed">
-        <div className="flex items-center gap-3">
-          <span
-            className="inline-block rounded-full"
-            style={{ width: 6, height: 6, background: machine.status === "Processing" ? C.green : C.textFaint }}
-          />
-          <span style={{ ...mono, fontSize: 13 }}>
-            {machine.status === "Processing" ? `Sorting → ${machine.sortingCategory}` : "No active batch"}
-          </span>
-        </div>
       </Panel>
     </div>
   );
@@ -1098,31 +1024,11 @@ function WeightMonitor({ machine, live }) {
         LOAD CELL → HX711 → ESP32 → WEB APP → DATABASE
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Panel><Metric label="TOTAL INPUT WEIGHT" value={inputW} unit="g" /></Panel>
         <Panel><Metric label="SORTED WEIGHT (BIN 1 + 2)" value={Math.round(sorted)} unit="g" color={C.green} /></Panel>
-        <Panel><Metric label="FINE / DEBRIS WEIGHT (BIN 3)" value={Math.round(live.debris)} unit="g" color={C.red} /></Panel>
         <Panel><Metric label="NOT YET RECORDED" value={Math.round(remaining)} unit="g" color={C.amber} /></Panel>
       </div>
-
-      <Panel title="Weight per category">
-        <div className="flex flex-col gap-2.5">
-          {CATS.map((c) => {
-            const pct = inputW ? (live[c] / inputW) * 100 : 0;
-            return (
-              <div key={c}>
-                <div className="flex justify-between mb-1" style={{ fontSize: 12 }}>
-                  <span style={{ color: C.textDim }}>{CAT_LABEL[c]}</span>
-                  <span style={{ ...mono }}>{Math.round(live[c])} g</span>
-                </div>
-                <div className="h-1.5 w-full" style={{ background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
-                  <div className="h-full" style={{ width: `${Math.min(pct, 100)}%`, background: CAT_COLOR[c] }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Panel>
 
       <div className="grid grid-cols-3 gap-4">
         <Panel title="Yield"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.green }}>{yieldPct.toFixed(1)}%</div>
@@ -1172,7 +1078,7 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
       <Panel title={`Batch summary — ${lastBatch.id}`} right={<BeanTag bean={lastBatch.beanType} />}>
-        <div className="grid grid-cols-3 gap-6 mb-4">
+        <div className="grid grid-cols-3 gap-6">
           <Metric label="INPUT WEIGHT" value={lastBatch.inputWeight} unit="g" />
           <Metric label="SORTED WEIGHT (BIN 1 + 2)" value={m.sorted} unit="g" />
           <Metric label="YIELD" value={m.yieldPct.toFixed(1)} unit="%" color={C.green} />
@@ -1180,23 +1086,13 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
           <Metric label="SHRINKAGE" value={m.shrinkagePct.toFixed(1)} unit="%" color={C.amber} />
           <Metric label="PROCESSING TIME" value={fmtTime(lastBatch.processingTime)} />
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          {CATS.map((c) => (
-            <div key={c} style={{ fontSize: 12 }}>
-              <span style={{ color: C.textDim }}>{CAT_LABEL[c]}: </span>
-              <span style={{ ...mono, color: CAT_COLOR[c] }}>
-                {((lastBatch.weights[c] / lastBatch.inputWeight) * 100).toFixed(0)}%
-              </span>
-            </div>
-          ))}
-        </div>
       </Panel>
 
       <div className="grid grid-cols-2 gap-5">
-        <Panel title="Size distribution — last batch">
+        <Panel title={`Size distribution — ${lastBatch.id}`}>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
-              <Pie data={sizeDist} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
+              <Pie data={sizeDist} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2} label={(e) => `${(e.percent * 100).toFixed(0)}%`}>
                 {sizeDist.map((d, i) => <Cell key={i} fill={d.color} stroke={C.panel} />)}
               </Pie>
               <Legend wrapperStyle={{ fontSize: 11, color: C.textDim }} />
@@ -1205,7 +1101,7 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
           </ResponsiveContainer>
         </Panel>
 
-        <Panel title="Weight distribution by category (recent batches)">
+        <Panel title="Batch comparison — weight per bin">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={comparison}>
               <CartesianGrid stroke={C.line} vertical={false} />
@@ -1359,50 +1255,6 @@ function AccuracyPanel({ batches, accuracy, onSave }) {
   );
 }
 
-/* ---------------------------------------------------------------
-   6. BATCH MANAGEMENT
---------------------------------------------------------------- */
-function BatchManagement({ machine, live, lastBatch }) {
-  const total = live.large + live.medium + live.debris;
-  const inProgress = machine.status === "Processing" || (machine.status === "Idle" && total > 0);
-
-  return (
-    <div className="flex flex-col gap-5 max-w-3xl">
-      <Panel
-        title={`Active batch — ${machine.batchId}`}
-        right={<StatusPill status={machine.status} />}
-      >
-        <div className="grid grid-cols-2 gap-y-3 gap-x-8" style={{ fontSize: 13 }}>
-          <Field label="Bean type" value={machine.beanType} />
-          <Field label="Operating mode" value={machine.mode} />
-          <Field label="Vibration speed" value={`${machine.vibrationSpeed}%`} />
-          <Field label="Input target" value={`${machine.inputTarget} g`} />
-          <Field label="Live weight" value={`${Math.round(total)} g`} />
-          <Field label="Processing time" value={fmtTime(machine.processingTime)} />
-        </div>
-      </Panel>
-
-      <Panel title="On completion">
-        <div style={{ fontSize: 12.5, color: C.textDim, lineHeight: 1.7 }}>
-          This batch is saved automatically once sorting finishes — bean type, mode, speed,
-          input weight, category weights, yield, shrinkage, and processing time all get written
-          to the batch record. Live category weights are on{" "}
-          <span style={{ color: C.text, fontWeight: 600 }}>Sorting monitor</span>, and every saved
-          record (including this one once it's done) shows up on{" "}
-          <span style={{ color: C.text, fontWeight: 600 }}>Batch history</span>.
-        </div>
-      </Panel>
-
-      {!inProgress && (
-        <div style={{ fontSize: 12, color: C.textFaint }}>
-          No batch is currently running. Start one from Machine control to populate this record live.
-          Most recently saved: <span style={{ ...mono, color: C.textDim }}>{lastBatch.id}</span> ({lastBatch.date}).
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Field({ label, value }) {
   return (
     <div>
@@ -1454,7 +1306,7 @@ function BatchHistory({ batches, sel, setSel }) {
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${C.line}` }}>
-              {["BATCH", "DATE", "TYPE", "INPUT", "YIELD", "FINE/DEBRIS", "TIME"].map((h) => (
+              {["BATCH", "DATE", "TYPE", "INPUT", "YIELD", "FINE/DEBRIS", "SHRINKAGE", "TIME"].map((h) => (
                 <th key={h} className="text-left py-2 pr-4" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>{h}</th>
               ))}
             </tr>
@@ -1473,8 +1325,9 @@ function BatchHistory({ batches, sel, setSel }) {
                   <td className="py-2.5 pr-4" style={{ fontSize: 12.5, color: C.textDim }}>{b.date}</td>
                   <td className="py-2.5 pr-4"><BeanTag bean={b.beanType} /></td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{b.inputWeight} g</td>
-                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.green }}>{m.yieldPct.toFixed(0)}%</td>
-                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.red }}>{m.finePct.toFixed(0)}%</td>
+                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.green }}>{m.yieldPct.toFixed(1)}%</td>
+                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.red }}>{m.finePct.toFixed(1)}%</td>
+                  <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13, color: C.amber }}>{m.shrinkagePct.toFixed(1)}%</td>
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{fmtTime(b.processingTime)}</td>
                 </tr>
               );
@@ -1488,32 +1341,28 @@ function BatchHistory({ batches, sel, setSel }) {
           title={`Batch detail — ${selected.id}`}
           right={<button onClick={() => setSel(null)} style={{ color: C.textFaint, fontSize: 12 }}>close ✕</button>}
         >
-          <div className="grid grid-cols-4 gap-y-4 gap-x-6 mb-4" style={{ fontSize: 13 }}>
-            <Field label="Date / time" value={selected.date} />
-            <Field label="Bean type" value={selected.beanType} />
+          <div className="grid grid-cols-2 gap-y-4 gap-x-6 mb-4" style={{ fontSize: 13 }}>
             <Field label="Operating mode" value={selected.mode} />
             <Field label="Vibration speed" value={`${selected.vibrationSpeed}%`} />
           </div>
           <table className="w-full">
             <tbody>
               {CATS.map((c) => (
-                <tr key={c} style={{ borderBottom: `1px solid ${C.line}` }}>
-                  <td className="py-2" style={{ fontSize: 13 }}>{CAT_LABEL[c]}</td>
+                <tr key={c} style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+                  <td className="py-2" style={{ fontSize: 13 }}>
+                    {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
+                  </td>
                   <td className="py-2 text-right" style={{ ...mono, fontSize: 13, color: CAT_COLOR[c] }}>{selected.weights[c]} g</td>
                 </tr>
               ))}
+              <tr>
+                <td className="py-2" style={{ fontSize: 13, fontWeight: 600 }}>Total recorded</td>
+                <td className="py-2 text-right" style={{ ...mono, fontSize: 13, fontWeight: 700 }}>
+                  {selected.weights.large + selected.weights.medium + selected.weights.debris} g
+                </td>
+              </tr>
             </tbody>
           </table>
-          {(() => {
-            const m = computeMetrics(selected);
-            return (
-              <div className="grid grid-cols-3 gap-4 mt-4">
-                <Field label="Yield" value={`${m.yieldPct.toFixed(1)}%`} />
-                <Field label="Fine / debris %" value={`${m.finePct.toFixed(1)}%`} />
-                <Field label="Shrinkage" value={`${m.shrinkagePct.toFixed(1)}%`} />
-              </div>
-            );
-          })()}
         </Panel>
       )}
     </div>

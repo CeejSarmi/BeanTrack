@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import {
-  Power, Square, RotateCcw, Wifi, WifiOff, Coffee,
+  Power, Square, RotateCcw, Wifi, WifiOff,
   Gauge, Scale, LayoutGrid, BarChart3, Boxes, History, SlidersHorizontal, AlertTriangle, Database,
 } from "lucide-react";
 import {
@@ -55,8 +55,7 @@ const STATUS_COLOR = {
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
   { id: "control", label: "Machine control", icon: SlidersHorizontal },
-  { id: "sorting", label: "Sorting monitor", icon: Coffee },
-  { id: "weight", label: "Weight monitor", icon: Scale },
+  { id: "monitor", label: "Sorting & weight", icon: Scale },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "history", label: "Batch history", icon: History },
   { id: "inventory", label: "Inventory", icon: Boxes },
@@ -733,8 +732,7 @@ export default function CoffeeSorterApp() {
               onFault={triggerFault}
             />
           )}
-          {view === "sorting" && <SortingMonitor machine={machine} live={live} />}
-          {view === "weight" && <WeightMonitor machine={machine} live={live} />}
+          {view === "monitor" && <SortingWeightMonitor machine={machine} live={live} />}
           {view === "analytics" && <Analytics batches={batches} lastBatch={lastBatch} accuracy={accuracy} onSaveAccuracy={saveAccuracy} />}
           {view === "history" && <BatchHistory batches={batches} sel={historySel} setSel={setHistorySel} />}
           {view === "inventory" && <Inventory inventory={inventory} />}
@@ -970,65 +968,68 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
 }
 
 /* ---------------------------------------------------------------
-   3. SORTING MONITOR
+   3. SORTING & WEIGHT MONITOR
 --------------------------------------------------------------- */
-function SortingMonitor({ machine, live }) {
-  const total = live.large + live.medium + live.debris;
+function SortingWeightMonitor({ machine, live }) {
+  const sorted = live.large + live.medium;
+  const total = sorted + live.debris;
+  const inputW = machine.inputTarget;
+  const notRecorded = Math.max(inputW - total, 0);
+  const yieldPct = inputW ? (sorted / inputW) * 100 : 0;
+  const finePct = inputW ? (live.debris / inputW) * 100 : 0;
+  const shrinkPct = inputW ? ((inputW - total) / inputW) * 100 : 0;
+  const batchDone = machine.status === "Completed"; // shrinkage is only final once all three bins have settled
+
+  const rowStyle = { borderBottom: `1px solid ${C.glassLine}` };
+  const valueStyle = { ...mono, fontSize: 13 };
+
   return (
     <div className="flex flex-col gap-5 max-w-3xl">
+      <div style={{ fontSize: 11, color: C.textFaint, ...mono }}>
+        LOAD CELL → HX711 → ESP32 → WEB APP → DATABASE
+      </div>
+
       <Panel title="Weight per bin" right={<BeanTag bean={machine.beanType} />}>
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ borderBottom: `1px solid ${C.glassLine}` }}>
+            <tr style={rowStyle}>
               <th className="text-left py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>BIN</th>
               <th className="text-right py-2" style={{ fontSize: 11, color: C.textFaint, fontWeight: 500 }}>WEIGHT</th>
             </tr>
           </thead>
           <tbody>
             {CATS.map((c) => (
-              <tr key={c} style={{ borderBottom: `1px solid ${C.glassLine}` }}>
-                <td className="py-2.5" style={{ fontSize: 13 }}>
-                  <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block", marginRight: 8 }} />
-                  {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
-                </td>
-                <td className="text-right" style={{ ...mono, fontSize: 13 }}>{Math.round(live[c])} g</td>
-              </tr>
+              <Fragment key={c}>
+                <tr style={rowStyle}>
+                  <td className="py-2.5" style={{ fontSize: 13 }}>
+                    <span style={{ width: 7, height: 7, background: CAT_COLOR[c], display: "inline-block", marginRight: 8 }} />
+                    {CAT_LABEL[c]} <span style={{ ...mono, fontSize: 10.5, color: C.textFaint }}>{BIN_INFO[c]}</span>
+                  </td>
+                  <td className="text-right" style={valueStyle}>{Math.round(live[c])} g</td>
+                </tr>
+                {c === "medium" && (
+                  <tr style={rowStyle}>
+                    <td className="py-2" style={{ fontSize: 12, color: C.textDim, paddingLeft: 15 }}>Sorted weight (Bin 1 + Bin 2)</td>
+                    <td className="text-right" style={{ ...valueStyle, color: C.green }}>{Math.round(sorted)} g</td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
-            <tr>
+            <tr style={rowStyle}>
               <td className="py-2.5" style={{ fontSize: 13, fontWeight: 600 }}>Total recorded</td>
-              <td className="text-right" style={{ ...mono, fontSize: 13, fontWeight: 700 }}>{Math.round(total)} g</td>
+              <td className="text-right" style={{ ...valueStyle, fontWeight: 700 }}>{Math.round(total)} g</td>
+            </tr>
+            <tr style={rowStyle}>
+              <td className="py-2.5" style={{ fontSize: 13 }}>Input weight</td>
+              <td className="text-right" style={valueStyle}>{inputW} g</td>
+            </tr>
+            <tr>
+              <td className="py-2.5" style={{ fontSize: 13 }}>Not yet recorded</td>
+              <td className="text-right" style={{ ...valueStyle, color: C.amber }}>{Math.round(notRecorded)} g</td>
             </tr>
           </tbody>
         </table>
       </Panel>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------
-   4. WEIGHT MONITOR
---------------------------------------------------------------- */
-function WeightMonitor({ machine, live }) {
-  const sorted = live.large + live.medium;
-  const total = sorted + live.debris;
-  const inputW = machine.inputTarget;
-  const remaining = Math.max(inputW - total, 0);
-  const yieldPct = inputW ? (sorted / inputW) * 100 : 0;
-  const finePct = inputW ? (live.debris / inputW) * 100 : 0;
-  const shrinkPct = inputW ? ((inputW - total) / inputW) * 100 : 0;
-  const batchDone = machine.status === "Completed"; // shrinkage is only final once all three bins have settled
-
-  return (
-    <div className="flex flex-col gap-5 max-w-4xl">
-      <div style={{ fontSize: 11, color: C.textFaint, ...mono }}>
-        LOAD CELL → HX711 → ESP32 → WEB APP → DATABASE
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <Panel><Metric label="TOTAL INPUT WEIGHT" value={inputW} unit="g" /></Panel>
-        <Panel><Metric label="SORTED WEIGHT (BIN 1 + 2)" value={Math.round(sorted)} unit="g" color={C.green} /></Panel>
-        <Panel><Metric label="NOT YET RECORDED" value={Math.round(remaining)} unit="g" color={C.amber} /></Panel>
-      </div>
 
       <div className="grid grid-cols-3 gap-4">
         <Panel title="Yield"><div style={{ ...mono, fontSize: 26, fontWeight: 700, color: C.green }}>{yieldPct.toFixed(1)}%</div>

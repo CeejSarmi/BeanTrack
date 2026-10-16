@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import {
   Power, Square, RotateCcw, Wifi, WifiOff,
-  Gauge, Scale, LayoutGrid, BarChart3, Boxes, History, SlidersHorizontal, AlertTriangle, Database,
+  Gauge, Timer, Activity, Scale, LayoutGrid, BarChart3, Boxes, History, SlidersHorizontal, AlertTriangle, Database,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -32,18 +32,24 @@ const C = {
   sidebarBorder: "#3D2914",
   sidebarActiveBg: "rgba(201,154,46,0.22)",
   // frosted-glass tokens
-  glass: "rgba(255,251,240,0.52)",
+  glass: "rgba(255,252,244,0.60)",
   glassStrong: "rgba(255,251,240,0.72)",
-  glassBorder: "rgba(255,255,255,0.65)",
+  glassBorder: "rgba(255,255,255,0.85)",
   glassLine: "rgba(120,84,40,0.16)",
   glassDark: "rgba(34,22,9,0.78)",
-  glassShadow: "0 8px 32px rgba(90,58,24,0.14)",
+  glassShadow: "0 1px 2px rgba(90,58,24,0.06), 0 18px 44px -14px rgba(90,58,24,0.24)",
+  glassGradient: "linear-gradient(180deg, rgba(255,255,255,0.62) 0%, rgba(255,251,240,0.40) 100%)",
+  goldGradient: "linear-gradient(135deg, #EDC66B 0%, #C99A2E 100%)",
+  brownGradient: "linear-gradient(135deg, #7A4B28 0%, #4A2E17 100%)",
 };
 
 const blur = { backdropFilter: "blur(16px) saturate(150%)", WebkitBackdropFilter: "blur(16px) saturate(150%)" };
 
-const mono = { fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace" };
-const sans = { fontFamily: "'Inter', 'Segoe UI', sans-serif" };
+const sans = { fontFamily: "'Plus Jakarta Sans', 'Inter', 'Segoe UI', sans-serif" };
+// "mono" now means: numbers/labels in the same typeface, with tabular figures so columns still line up
+// coffee-house serif: used only for page titles and the cafe name (static text), never for live numbers
+const display = { fontFamily: "'Fraunces', 'Playfair Display', Georgia, 'Times New Roman', serif" };
+const mono = { fontFamily: "'Plus Jakarta Sans', 'Inter', 'Segoe UI', sans-serif", fontVariantNumeric: "tabular-nums" };
 
 const STATUS_COLOR = {
   Idle: C.textFaint,
@@ -121,9 +127,9 @@ function Panel({ title, right, children, style }) {
   return (
     <div
       style={{
-        background: C.glass,
+        background: C.glassGradient,
         border: `1px solid ${C.glassBorder}`,
-        borderRadius: 18,
+        borderRadius: 24,
         boxShadow: C.glassShadow,
         overflow: "hidden",
         ...blur,
@@ -131,16 +137,22 @@ function Panel({ title, right, children, style }) {
       }}
     >
       {title && (
-        <div
-          className="flex items-center justify-between px-4 py-2.5"
-          style={{ borderBottom: `1px solid ${C.glassLine}` }}
-        >
-          <span style={{ ...sans, color: C.textDim, fontSize: 12, letterSpacing: "0.02em" }}>{title}</span>
+        <div className="flex items-center justify-between px-5 pt-4">
+          <span style={{ ...sans, color: C.textDim, fontSize: 12.5, fontWeight: 600, letterSpacing: "0.01em" }}>{title}</span>
           {right}
         </div>
       )}
-      <div className="p-4">{children}</div>
+      <div className={title ? "px-5 pt-3 pb-5" : "p-5"}>{children}</div>
     </div>
+  );
+}
+
+// Small round icon chip shown in front of a tile title
+function IconChip({ icon: Icon }) {
+  return (
+    <span className="flex items-center justify-center" style={{ width: 26, height: 26, borderRadius: 9, background: `${C.amber}30` }}>
+      <Icon size={14} color={C.green} />
+    </span>
   );
 }
 
@@ -148,8 +160,8 @@ function Panel({ title, right, children, style }) {
 function PageHeader({ title, purpose }) {
   return (
     <div>
-      <div style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}>{title}</div>
-      <div style={{ fontSize: 12.5, color: C.textDim, marginTop: 2 }}>{purpose}</div>
+      <div style={{ ...display, fontSize: 32, fontWeight: 700, letterSpacing: "-0.015em", lineHeight: 1.15 }}>{title}</div>
+      <div style={{ fontSize: 13.5, color: C.textDim, marginTop: 3 }}>{purpose}</div>
     </div>
   );
 }
@@ -174,8 +186,8 @@ function SampleTag() {
 function Metric({ label, value, unit, color }) {
   return (
     <div>
-      <div style={{ ...sans, color: C.textFaint, fontSize: 11, marginBottom: 4 }}>{label}</div>
-      <div style={{ ...mono, color: color || C.text, fontSize: 22, fontWeight: 600, lineHeight: 1 }}>
+      <div style={{ ...sans, color: C.textFaint, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+      <div style={{ ...mono, color: color || C.text, fontSize: 24, fontWeight: 700, lineHeight: 1 }}>
         {value}
         {unit && <span style={{ fontSize: 13, color: C.textDim, marginLeft: 4 }}>{unit}</span>}
       </div>
@@ -204,18 +216,14 @@ function Button({ children, onClick, disabled, variant = "action", icon: Icon })
   const [flash, setFlash] = useState(false);
 
   const cream = C.panel;
-  const yellow = C.amber;
-  const brown = C.green; // dark brown token
-  const dark = C.text; // near-black ink, for the reset confirm-flash
-
   let bg, fg, border;
   if (variant === "reset") {
-    if (flash) { bg = dark; fg = cream; border = dark; }
-    else { bg = yellow; fg = C.text; border = yellow; }
+    if (flash) { bg = C.text; fg = cream; border = C.text; }
+    else { bg = C.goldGradient; fg = C.text; border = C.amber; }
   } else {
-    if (pressed) { bg = brown; fg = cream; border = brown; }
-    else if (hover) { bg = yellow; fg = C.text; border = yellow; }
-    else { bg = C.glass; fg = C.text; border = C.glassBorder; }
+    if (pressed) { bg = C.brownGradient; fg = cream; border = C.green; }
+    else if (hover) { bg = C.goldGradient; fg = C.text; border = C.amber; }
+    else { bg = C.glassStrong; fg = C.text; border = C.glassBorder; }
   }
 
   function handleClick(e) {
@@ -235,18 +243,20 @@ function Button({ children, onClick, disabled, variant = "action", icon: Icon })
       onMouseDown={() => setPressed(true)}
       onMouseUp={() => setPressed(false)}
       disabled={disabled}
-      className="flex items-center justify-center gap-2 px-4 py-2.5 transition-colors"
+      className="flex items-center justify-center gap-2 px-5 py-2.5"
       style={{
         background: disabled ? "rgba(255,251,240,0.35)" : bg,
         color: disabled ? C.textFaint : fg,
         border: `1px solid ${disabled ? C.glassLine : border}`,
-        borderRadius: 12,
+        borderRadius: 999,
         cursor: disabled ? "not-allowed" : "pointer",
-        ...blur,
+        boxShadow: disabled || pressed ? "none" : "0 4px 14px -6px rgba(90,58,24,0.35)",
+        transform: hover && !disabled && !pressed ? "translateY(-1px)" : "none",
+        transition: "transform .15s ease, box-shadow .15s ease, background .15s ease",
         ...mono,
         fontSize: 12.5,
-        fontWeight: 600,
-        letterSpacing: "0.01em",
+        fontWeight: 700,
+        letterSpacing: "0.02em",
       }}
     >
       {Icon && <Icon size={14} />}
@@ -281,7 +291,7 @@ function AlertBanner({ severity, icon: Icon, code, title, message, action }) {
       style={{
         background: isError ? "rgba(34,22,9,0.92)" : "rgba(232,178,58,0.30)",
         border: `1px solid ${isError ? "rgba(232,178,58,0.55)" : "rgba(201,154,46,0.65)"}`,
-        borderRadius: 16,
+        borderRadius: 22,
         boxShadow: C.glassShadow,
         color: isError ? C.sidebarText : C.text,
         ...blur,
@@ -621,7 +631,7 @@ export default function CoffeeSorterApp() {
 
   return (
     <div
-      className="w-full h-full min-h-[720px] flex p-3 gap-3"
+      className="w-full h-full min-h-[720px] flex p-4 gap-4"
       style={{
         position: "relative",
         overflow: "hidden",
@@ -631,7 +641,23 @@ export default function CoffeeSorterApp() {
         ...sans,
       }}
     >
-      <style>{`@keyframes bt-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(232,178,58,0.45); } 50% { box-shadow: 0 0 0 8px rgba(232,178,58,0); } }`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        @keyframes bt-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(232,178,58,0.45); } 50% { box-shadow: 0 0 0 8px rgba(232,178,58,0); } }
+        .bt-range { -webkit-appearance: none; appearance: none; height: 10px; border-radius: 999px; outline: none; cursor: pointer; min-width: 0;
+          background: linear-gradient(to right, var(--fill) 0%, var(--fill) var(--pct), rgba(120,84,40,0.16) var(--pct), rgba(120,84,40,0.16) 100%); }
+        .bt-range:disabled { cursor: not-allowed; opacity: 0.5; }
+        .bt-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%; background: #fff;
+          border: 3px solid var(--fill); box-shadow: 0 3px 10px rgba(60,40,15,0.30); transition: transform .15s ease; }
+        .bt-range:hover::-webkit-slider-thumb { transform: scale(1.12); }
+        .bt-range::-moz-range-track { height: 10px; border-radius: 999px; background: rgba(120,84,40,0.16); }
+        .bt-range::-moz-range-progress { height: 10px; border-radius: 999px; background: var(--fill); }
+        .bt-range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid var(--fill); box-shadow: 0 3px 10px rgba(60,40,15,0.30); }
+        .bt-nav { transition: background .18s ease, color .18s ease; }
+        .bt-nav:not(.active):hover { background: rgba(255,255,255,0.09); }
+        .bt-row { transition: background .15s ease; }
+        .bt-row:hover { background: rgba(255,255,255,0.55); }
+      `}</style>
       {/* soft coffee-toned glow blobs (give the glass something to blur) */}
       <div style={{ position: "absolute", top: -120, right: -80, width: 460, height: 460, borderRadius: "50%", background: "#EBC163", opacity: 0.20, filter: "blur(140px)", pointerEvents: "none" }} />
       <div style={{ position: "absolute", bottom: -160, left: 120, width: 520, height: 520, borderRadius: "50%", background: "#A97C50", opacity: 0.13, filter: "blur(150px)", pointerEvents: "none" }} />
@@ -645,8 +671,8 @@ export default function CoffeeSorterApp() {
           width: 216,
           background: C.glassDark,
           border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: 22,
-          boxShadow: "0 10px 36px rgba(34,22,9,0.28)",
+          borderRadius: 28,
+          boxShadow: "0 18px 48px -12px rgba(34,22,9,0.42)",
           overflow: "hidden",
           ...blur,
         }}
@@ -658,8 +684,8 @@ export default function CoffeeSorterApp() {
             style={{ width: 42, height: 42, borderRadius: "50%", flexShrink: 0, boxShadow: "0 0 0 2px rgba(255,255,255,0.18)" }}
           />
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.01em", color: C.sidebarText }}>Beanhi</div>
-            <div style={{ fontSize: 10, color: C.sidebarTextDim, ...mono }}>Coffee Beans &amp; Cafe</div>
+            <div style={{ ...display, fontSize: 21, fontWeight: 700, lineHeight: 1.1, color: C.sidebarText }}>Beanhi</div>
+            <div style={{ fontSize: 9.5, color: C.sidebarTextDim, ...sans, fontWeight: 600, letterSpacing: "0.13em", textTransform: "uppercase", marginTop: 2 }}>Coffee Beans &amp; Cafe</div>
           </div>
         </div>
 
@@ -671,14 +697,16 @@ export default function CoffeeSorterApp() {
               <button
                 key={n.id}
                 onClick={() => setView(n.id)}
-                className="flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors"
+                className={`bt-nav flex items-center gap-2.5 px-4 py-2.5 text-left${active ? " active" : ""}`}
                 style={{
                   width: "calc(100% - 16px)",
                   margin: "2px 8px",
-                  borderRadius: 12,
-                  background: active ? C.sidebarActiveBg : "transparent",
-                  border: `1px solid ${active ? "rgba(232,178,58,0.45)" : "transparent"}`,
-                  color: active ? C.sidebarText : C.sidebarTextDim,
+                  borderRadius: 999,
+                  background: active ? C.goldGradient : undefined,
+                  border: "1px solid transparent",
+                  color: active ? C.sidebarBg : C.sidebarTextDim,
+                  fontWeight: active ? 700 : 500,
+                  boxShadow: active ? "0 6px 18px -6px rgba(232,178,58,0.55)" : "none",
                 }}
               >
                 <Icon size={15} />
@@ -762,45 +790,70 @@ export default function CoffeeSorterApp() {
 --------------------------------------------------------------- */
 function Dashboard({ machine, live, inventory, dbDown }) {
   const total = live.large + live.medium + live.debris;
+  // the ring shows how much of the loaded input has been weighed so far (all three bins)
+  const pct = machine.inputTarget ? Math.min((total / machine.inputTarget) * 100, 100) : 0;
+  const RING_R = 54;
+  const RING_LEN = 2 * Math.PI * RING_R;
+
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
       <PageHeader title="Dashboard" purpose="Live view of the current batch and the stock on hand." />
       <SectionLabel>CURRENT BATCH</SectionLabel>
+
       <Panel title="Batch status">
-        <div className="grid grid-cols-4 gap-6">
-          <Metric label="STATUS" value={machine.status} color={STATUS_COLOR[machine.status]} />
-          <Metric label={machine.status === "Idle" ? "NEXT BATCH NUMBER" : "BATCH NUMBER"} value={machine.batchId} />
-          <Metric label="BEAN TYPE" value={machine.beanType} color={machine.beanType === "Arabica" ? C.arabica : C.robusta} />
-          <Metric label="OPERATING MODE" value={machine.mode} color={machine.mode === "Automatic" ? C.blue : C.amber} />
+        <div className="flex items-center gap-8 flex-wrap">
+          <div style={{ position: "relative", width: 140, height: 140, flexShrink: 0 }}>
+            <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="70" cy="70" r={RING_R} fill="none" stroke="rgba(120,84,40,0.14)" strokeWidth="13" />
+              <circle
+                cx="70" cy="70" r={RING_R} fill="none" stroke={STATUS_COLOR[machine.status]} strokeWidth="13" strokeLinecap="round"
+                strokeDasharray={RING_LEN} strokeDashoffset={RING_LEN * (1 - pct / 100)}
+                style={{ transition: "stroke-dashoffset 0.4s ease, stroke 0.3s ease" }}
+              />
+            </svg>
+            <div className="flex flex-col items-center justify-center" style={{ position: "absolute", inset: 0 }}>
+              <span style={{ ...mono, fontSize: 28, fontWeight: 800, lineHeight: 1 }}>{Math.round(pct)}%</span>
+              <span style={{ fontSize: 10.5, color: C.textFaint, marginTop: 3 }}>of input</span>
+            </div>
+          </div>
+
+          <div className="flex-1" style={{ minWidth: 300 }}>
+            <div style={{ ...sans, color: C.textFaint, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 6 }}>Total recorded</div>
+            <div style={{ ...mono, fontSize: 38, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em" }}>
+              {Math.round(total)}<span style={{ fontSize: 18, fontWeight: 600, color: C.textDim }}> g</span>
+            </div>
+            <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>of {machine.inputTarget} g input · all three bins</div>
+
+            <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-5 pt-5" style={{ borderTop: `1px solid ${C.glassLine}` }}>
+              <Metric label="STATUS" value={machine.status} color={STATUS_COLOR[machine.status]} />
+              <Metric label={machine.status === "Idle" ? "NEXT BATCH NUMBER" : "BATCH NUMBER"} value={machine.batchId} />
+              <Metric label="BEAN TYPE" value={machine.beanType} color={machine.beanType === "Arabica" ? C.arabica : C.robusta} />
+              <Metric label="OPERATING MODE" value={machine.mode} color={machine.mode === "Automatic" ? C.blue : C.amber} />
+            </div>
+          </div>
         </div>
       </Panel>
 
       <div className="grid grid-cols-3 gap-5">
-        <Panel title="Vibration speed">
-          <Gauge className="mb-1" size={16} color={C.textFaint} />
-          <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{machine.vibrationSpeed}<span style={{ fontSize: 15, color: C.textDim }}>%</span></div>
-          <div className="mt-2 h-1.5 w-full" style={{ position: "relative", background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
-            <div className="h-full" style={{ width: `${machine.vibrationSpeed}%`, background: C.amber }} />
+        <Panel title={<span className="flex items-center gap-2"><IconChip icon={Gauge} />Vibration speed</span>}>
+          <div style={{ ...mono, fontSize: 34, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em" }}>
+            {machine.vibrationSpeed}<span style={{ fontSize: 17, fontWeight: 600, color: C.textDim }}>%</span>
+          </div>
+          <div className="mt-3 h-2 w-full" style={{ position: "relative", background: C.glassLine, borderRadius: 999, overflow: "hidden" }}>
+            <div className="h-full" style={{ width: `${machine.vibrationSpeed}%`, background: C.goldGradient, borderRadius: 999 }} />
             <div style={{ position: "absolute", top: 0, bottom: 0, left: `${RECOMMENDED_SPEED}%`, width: 2, background: C.text, opacity: 0.55 }} />
           </div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>Recommended: {RECOMMENDED_SPEED}% (the line on the bar)</div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 8 }}>Recommended: {RECOMMENDED_SPEED}% (the line on the bar)</div>
         </Panel>
-        <Panel title="Processing time">
-          <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{fmtTime(machine.processingTime)}</div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>mm:ss elapsed this batch</div>
+        <Panel title={<span className="flex items-center gap-2"><IconChip icon={Timer} />Processing time</span>}>
+          <div style={{ ...mono, fontSize: 34, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em" }}>{fmtTime(machine.processingTime)}</div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 14 }}>mm:ss elapsed this batch</div>
         </Panel>
-        <Panel title="Total recorded">
-          <div style={{ ...mono, fontSize: 30, fontWeight: 700 }}>{Math.round(total)}<span style={{ fontSize: 15, color: C.textDim }}> g</span></div>
-          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 6 }}>of {machine.inputTarget} g input · all three bins</div>
+        <Panel title={<span className="flex items-center gap-2"><IconChip icon={Activity} />Active bin</span>}>
+          <div style={{ ...mono, fontSize: 24, fontWeight: 800, lineHeight: 1.15 }}>{machine.sortingCategory}</div>
+          <div style={{ fontSize: 11, color: C.textFaint, marginTop: 14 }}>bin being weighed right now</div>
         </Panel>
       </div>
-
-      <Panel title="Active bin">
-        <div className="flex items-center gap-3">
-          <div style={{ width: 8, height: 8, background: C.blue, borderRadius: "50%" }} />
-          <span style={{ ...mono, fontSize: 18, fontWeight: 600 }}>{machine.sortingCategory}</span>
-        </div>
-      </Panel>
 
       <SectionLabel>STOCK ON HAND (kg)</SectionLabel>
       {dbDown && (
@@ -836,9 +889,9 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             const active = machine.beanType === t;
             const hovered = hoveredBean === t;
             let bg, fg, border;
-            if (active) { bg = C.green; fg = C.panel; border = C.green; }
-            else if (hovered) { bg = C.amber; fg = C.text; border = C.amber; }
-            else { bg = C.glass; fg = C.textDim; border = C.glassBorder; }
+            if (active) { bg = C.brownGradient; fg = C.panel; border = C.green; }
+            else if (hovered) { bg = C.goldGradient; fg = C.text; border = C.amber; }
+            else { bg = C.glassStrong; fg = C.textDim; border = C.glassBorder; }
             return (
               <button
                 key={t}
@@ -851,7 +904,8 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
                   border: `1px solid ${border}`,
                   background: bg,
                   color: fg,
-                  borderRadius: 14,
+                  borderRadius: 999,
+                  fontWeight: 700,
                   ...blur,
                   cursor: locked ? "not-allowed" : "pointer",
                 }}
@@ -885,8 +939,8 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             onPointerDown={() => setWeightActive(true)}
             onPointerUp={() => setWeightActive(false)}
             disabled={locked}
-            className="flex-1"
-            style={{ accentColor: weightActive ? C.amber : C.textFaint }}
+            className="bt-range flex-1"
+            style={{ "--pct": `${((machine.inputTarget - 200) / 1800) * 100}%`, "--fill": weightActive ? C.amber : "#B79F76" }}
           />
           <NumberField
             value={machine.inputTarget}
@@ -905,9 +959,9 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             const active = machine.mode === m;
             const hovered = hoveredMode === m;
             let bg, fg, border;
-            if (active) { bg = C.green; fg = C.panel; border = C.green; }
-            else if (hovered) { bg = C.amber; fg = C.text; border = C.amber; }
-            else { bg = C.glass; fg = C.textDim; border = C.glassBorder; }
+            if (active) { bg = C.brownGradient; fg = C.panel; border = C.green; }
+            else if (hovered) { bg = C.goldGradient; fg = C.text; border = C.amber; }
+            else { bg = C.glassStrong; fg = C.textDim; border = C.glassBorder; }
             return (
               <button
                 key={m}
@@ -953,8 +1007,8 @@ function Control({ machine, onStart, onStop, onReset, setBeanType, setMode, setS
             onBlur={() => setSpeedActive(false)}
             onPointerDown={() => setSpeedActive(true)}
             onPointerUp={() => setSpeedActive(false)}
-            className="flex-1"
-            style={{ accentColor: speedActive ? C.amber : C.textFaint }}
+            className="bt-range flex-1"
+            style={{ "--pct": `${machine.vibrationSpeed}%`, "--fill": speedActive ? C.amber : "#B79F76" }}
           />
           <NumberField
             value={machine.vibrationSpeed}
@@ -1154,9 +1208,9 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
         <Panel title="Batch comparison — weight per bin">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={comparison}>
-              <CartesianGrid stroke={C.line} vertical={false} />
-              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
-              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
+              <CartesianGrid stroke={C.glassLine} strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: C.glassStrong, border: `1px solid ${C.glassBorder}`, borderRadius: 12, fontSize: 12 }} />
               <Bar dataKey="large" stackId="a" fill={CAT_COLOR.large} />
               <Bar dataKey="medium" stackId="a" fill={CAT_COLOR.medium} />
@@ -1168,12 +1222,12 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
         <Panel title="Yield & fine/debris trend">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trend}>
-              <CartesianGrid stroke={C.line} vertical={false} />
-              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
-              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
+              <CartesianGrid stroke={C.glassLine} strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: C.glassStrong, border: `1px solid ${C.glassBorder}`, borderRadius: 12, fontSize: 12 }} />
-              <Line type="monotone" dataKey="yieldPct" stroke={C.amber} strokeWidth={2} dot={false} name="Yield %" />
-              <Line type="monotone" dataKey="finePct" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} name="Fine / debris %" />
+              <Line type="monotone" dataKey="yieldPct" stroke={C.amber} strokeWidth={3} dot={false} name="Yield %" />
+              <Line type="monotone" dataKey="finePct" stroke={C.red} strokeWidth={3} dot={{ r: 3 }} name="Fine / debris %" />
             </LineChart>
           </ResponsiveContainer>
         </Panel>
@@ -1181,11 +1235,11 @@ function Analytics({ batches, lastBatch, accuracy, onSaveAccuracy }) {
         <Panel title="Processing time per batch (min)">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={trend}>
-              <CartesianGrid stroke={C.line} vertical={false} />
-              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
-              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={{ stroke: C.line }} tickLine={false} />
+              <CartesianGrid stroke={C.glassLine} strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="id" tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: C.glassStrong, border: `1px solid ${C.glassBorder}`, borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey="minutes" fill={C.blue} />
+              <Bar dataKey="minutes" fill={C.blue} radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>
@@ -1364,8 +1418,9 @@ function BatchHistory({ batches, sel, setSel }) {
               return (
                 <tr
                   key={b.id}
+                  className="bt-row"
                   onClick={() => setSel(active ? null : b.id)}
-                  style={{ borderBottom: `1px solid ${C.line}`, cursor: "pointer", background: active ? C.panelRaised : "transparent" }}
+                  style={{ borderBottom: `1px solid ${C.line}`, cursor: "pointer", background: active ? "rgba(255,255,255,0.7)" : undefined }}
                 >
                   <td className="py-2.5 pr-4" style={{ ...mono, fontSize: 13 }}>{b.id}{b.sample && <SampleTag />}</td>
                   <td className="py-2.5 pr-4" style={{ fontSize: 12.5, color: C.textDim }}>{b.date}</td>
